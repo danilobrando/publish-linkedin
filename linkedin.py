@@ -18,7 +18,10 @@ import time
 import requests
 
 API = "https://api.linkedin.com"
-API_VERSION = "202506"          # LinkedIn versiona por YYYYMM y lo exige en cada llamada
+# LinkedIn versiona por YYYYMM y lo exige en CADA llamada. Retira versiones a los
+# ~12 meses: una version vencida devuelve 426 NONEXISTENT_VERSION y no publica nada.
+# Por eso `_renegociar_version()` la recalcula sola en vez de morir en silencio.
+API_VERSION = "202608"
 REDIRECT_URI = "http://localhost:8765/callback"
 SCOPES = ["openid", "profile", "email", "w_member_social"]
 
@@ -103,6 +106,32 @@ class LinkedIn:
             raise ErrorLinkedIn(f"El token venció el {venc}. Corre: python auth.py login")
         return cls(token)
 
+    def _renegociar_version(self) -> bool:
+        """LinkedIn retiró la versión fijada. Busca la más reciente que siga activa.
+
+        Sin esto, el conector muere en silencio ~12 meses después de escribirse:
+        es exactamente como caducó el repo del que se copió esta constante.
+        """
+        global API_VERSION
+        hoy = time.localtime()
+        for atras in range(0, 13):
+            mes, anio = hoy.tm_mon - atras, hoy.tm_year
+            while mes <= 0:
+                mes += 12
+                anio -= 1
+            v = f"{anio}{mes:02d}"
+            if v == API_VERSION:
+                continue
+            r = requests.get(
+                f"{API}/v2/userinfo", timeout=15,
+                headers={"Authorization": f"Bearer {self.token['access_token']}",
+                         "X-Restli-Protocol-Version": "2.0.0", "LinkedIn-Version": v},
+            )
+            if "NONEXISTENT_VERSION" not in r.text:
+                API_VERSION = v
+                return True
+        return False
+
     def _headers(self) -> dict:
         return {
             "Authorization": f"Bearer {self.token['access_token']}",
@@ -141,6 +170,17 @@ class LinkedIn:
         }
         r = requests.post(f"{API}/rest/posts", headers=self._headers(),
                           json=payload, timeout=30)
+
+        # Versión caducada: renegocia una vigente y reintenta UNA vez.
+        if r.status_code == 426 and "NONEXISTENT_VERSION" in r.text:
+            if not self._renegociar_version():
+                raise ErrorLinkedIn(
+                    f"La versión {API_VERSION} caducó y no encontré ninguna vigente "
+                    "en los últimos 12 meses. Revisa la consola de LinkedIn Developer."
+                )
+            r = requests.post(f"{API}/rest/posts", headers=self._headers(),
+                              json=payload, timeout=30)
+
         if r.status_code != 201:
             raise ErrorLinkedIn(f"LinkedIn respondió {r.status_code}: {r.text[:400]}")
 
@@ -151,3 +191,30 @@ class LinkedIn:
             "caracteres": len(texto),
             "visibilidad": visibilidad,
         }
+
+    @staticmethod
+    def limpiar_urn(crudo: str) -> str:
+        """Acepta lo que un humano realmente pega y devuelve un URN válido.
+
+        Sirve tanto 'urn:li:share:123' como la URL completa del post o el URN
+        con barra y salto de línea pegados detrás. LinkedIn rechaza cualquier
+        carácter de más con un 400 críptico.
+        """
+        m = re.search(r"urn:li:(?:share|ugcPost|activity):\d+", crudo or "")
+        if not m:
+            raise ErrorLinkedIn(f"No reconozco un URN de post en: {crudo!r}")
+        return m.group(0)
+
+    def borrar(self, urn: str) -> None:
+        """Borra un post ya publicado. El botón de deshacer.
+
+        LinkedIn exige el URN percent-encoded en la ruta.
+        """
+        import urllib.parse
+        urn = self.limpiar_urn(urn)
+        r = requests.delete(
+            f"{API}/rest/posts/{urllib.parse.quote(urn, safe='')}",
+            headers=self._headers(), timeout=30,
+        )
+        if r.status_code not in (200, 204):
+            raise ErrorLinkedIn(f"No se pudo borrar ({r.status_code}): {r.text[:300]}")

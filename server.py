@@ -102,5 +102,21 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
     return f"✓ Publicado.\n  {r['url']}\n  {r['urn']}"
 
 
+@mcp.tool()
+def linkedin_borrar(urn: str) -> str:
+    """Borra un post que acabas de publicar. El botón de deshacer.
+
+    Args:
+        urn: el URN que devolvió linkedin_publicar (urn:li:share:… o urn:li:ugcPost:…)
+    """
+    try:
+        LinkedIn.desde_keychain().borrar(urn)
+    except ErrorLinkedIn as e:
+        _registrar(f"FALLO_BORRAR\t{urn}\t{e}")
+        return f"✗ No se pudo borrar: {e}"
+    _registrar(f"BORRADO\t{urn}")
+    return f"✓ Borrado de LinkedIn: {urn}"
+
+
 if __name__ == "__main__":
     mcp.run()
