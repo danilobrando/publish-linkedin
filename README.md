@@ -104,12 +104,35 @@ Si no imprime `OK`, arregla eso antes de continuar.
 
 ## Paso 2 — Credenciales *(lo hace el usuario)*
 
-Pregúntale al usuario cuál es su caso:
+**Lo normal y lo recomendado es que el usuario cree su propia app.** Es suya, no depende
+de nadie, y no se le vence cuando alguien más rote un secreto. Empieza siempre por ahí.
 
-- **«Estoy en un curso / me dieron credenciales»** → que las tenga a mano y siga.
-- **«Voy por mi cuenta»** → mándalo primero a la sección
-  [Crear tu propia app](#crear-tu-propia-app) de este mismo archivo. Necesita administrar
-  una Página de LinkedIn. Recién cuando tenga Client ID y Secret, vuelve aquí.
+Dile:
+
+> Vas a crear tu propia aplicación de LinkedIn. Toma unos 10 minutos y te queda tuya para
+> siempre. Necesitas administrar una **Página de LinkedIn** — si no tienes una, la creas
+> gratis en el momento; sirve una página de tu empresa, de tu marca personal, o una de
+> prueba.
+
+Llévalo paso a paso por la sección [Crear tu propia app](#crear-tu-propia-app) de este
+mismo archivo. **No la resumas: acompáñalo por cada pestaña** y espera confirmación en cada
+una. Los dos errores que más pasan son pedir el producto equivocado y escribir mal la
+Redirect URL.
+
+Cuando tenga Client ID y Client Secret, sigue abajo.
+
+### Plan B — credenciales prestadas
+
+**Solo** si el usuario no puede crear la app ahora (no administra ninguna página, LinkedIn
+no le deja, o se quedó sin tiempo en una clase en vivo). Dile que le pida al instructor su
+Client ID y Client Secret, y explícale por qué no es riesgoso:
+
+> Son las credenciales de una **empresa de prueba**, creada justamente para esto — no de
+> una compañía real. La app solo sirve para pedir permiso: **el token que se genera es
+> tuyo y solo publica en tu perfil.** Nadie puede publicar por ti, ni tú por nadie.
+
+Adviértele también que **es prestado**: si el instructor rota el secreto, tiene que volver
+a hacer el paso 2 con credenciales propias. Por eso el camino bueno es el de arriba.
 
 Dile que corra **en su terminal**, dentro de la carpeta del repo:
 
@@ -223,7 +246,10 @@ py -m venv .venv
 Te pide un **Client ID** y un **Client Secret**, que identifican a la
 aplicación que pide permiso — no a ti.
 
-> 🎓 **Si estás en un curso:** pide esas dos credenciales a quien lo dicta.
+> 🎓 **Lo recomendado es crear tu propia app** — ver
+> [Crear tu propia app](#crear-tu-propia-app). Toma ~10 minutos y queda tuya.
+>
+> **Si estás en un curso y no alcanzas:** pide esas dos credenciales a quien lo dicta.
 > Una misma aplicación puede servir a todo el salón: cada persona autoriza
 > por su lado y publica en su propio perfil. **No van en este repo.**
 >
@@ -322,19 +348,21 @@ puede publicar en el perfil de otro.** Dicho eso, dos cosas que conviene saber:
 
 ## Crear tu propia app
 
-Solo si quieres tu propia aplicación en vez de usar una compartida.
+**Este es el camino recomendado.** Toma ~10 minutos y la app queda tuya.
+
+### Primero: la Página
+
+LinkedIn no deja crear una app sin asociarle una **Página**. Si no administras ninguna,
+créala gratis en **[linkedin.com/company/setup/new](https://www.linkedin.com/company/setup/new)**.
+Sirve tu empresa, tu marca personal, o una página de prueba — da igual: **la página no es
+donde sale el post.** El post sale en tu perfil personal. La página solo figura como
+"editor" de la app en el portal. Es papeleo.
+
+### Después: la app
 
 Ve a **[linkedin.com/developers/apps](https://www.linkedin.com/developers/apps)**
-→ *Create app*.
-
-> ⚠️ **LinkedIn te va a exigir una Página de LinkedIn.** No se puede crear una
-> app sin asociarle una, y un *super admin* de esa página tiene que aprobar la
-> verificación con un enlace. Si administras alguna, úsala. Si no, este es el
-> punto donde conviene pedir prestadas las credenciales de una app existente
-> en vez de crear una página solo para esto.
->
-> **La Página no es donde sale el post.** El post sale en tu perfil personal.
-> La página solo figura como "editor" de la app en el portal. Es papeleo.
+→ *Create app*. Asóciala a tu página. Un *super admin* de esa página tiene que aprobar la
+verificación con un enlace — si la página es tuya, eres tú y es un clic.
 
 **Pestaña `Products`** — pide estos dos. Ambos son **aprobación instantánea**:
 
