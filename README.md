@@ -59,8 +59,13 @@ instale. Sigue estos pasos en orden y no te saltes ninguna verificación.
 | ❌ **Nunca** pidas ni recibas el Client Secret por el chat | Va tecleado directo en la terminal del usuario. Si te lo pega, dile que lo rote. |
 | ✅ Sí corres | `git clone`, crear el entorno, instalar dependencias, `claude mcp add`, `auth.py estado` |
 
-**Cuando llegues a un paso del usuario:** dale el comando exacto, dile que lo corra **en su
-propia terminal**, y **espera** a que te diga que terminó. No sigas de largo.
+**Cuando llegues a un paso del usuario:** dale el comando exacto **con ruta absoluta**,
+dile que lo corra **en su propia terminal**, y **espera** a que te diga que terminó. No
+sigas de largo.
+
+**Antes de empezar, avísale:** *"te voy a pedir permiso para correr `git` y `pip`; apruébalos
+o no puedo instalar nada."* Sin eso, el primer comando se bloquea y el usuario no entiende
+por qué.
 
 ## Paso 1 — Instalar *(lo haces tú)*
 
@@ -84,6 +89,12 @@ py -m venv .venv
 
 > ⚠️ El entorno **tiene que llamarse `.venv`** y estar dentro del repo. El paso 4 depende
 > de esa ruta exacta. No uses `uv`, `conda`, ni un entorno global aunque estén disponibles.
+
+> ⚠️ **Clona dentro de la carpeta donde el usuario te abrió**, no en `/tmp` ni en el home.
+> Apenas termines, corre `pwd` dentro del repo y **dile al usuario la ruta absoluta**.
+> Desde ahí, **todo comando que le entregues al usuario lleva la ruta absoluta completa**
+> — él va a correrlos en otra terminal, parada en otro lado. Un `cd publish-linkedin`
+> relativo es la causa #1 de que esto falle.
 
 **Verifica antes de seguir** (macOS/Linux · en Windows `.venv\Scripts\python`):
 ```bash
