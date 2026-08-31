@@ -1,0 +1,153 @@
+"""
+Cliente mínimo de LinkedIn: autenticación y publicación. Nada más.
+
+Diseñado para leerse completo en una pantalla. Si necesitas algo que no
+está aquí, escríbelo tú — no instales una plataforma de 87 herramientas
+para usar tres.
+
+API oficial (OAuth 2.0 + scope w_member_social). No usa cookies del
+navegador: eso vive en zona gris de los términos de LinkedIn.
+"""
+from __future__ import annotations
+
+import json
+import re
+import subprocess
+import time
+
+import requests
+
+API = "https://api.linkedin.com"
+API_VERSION = "202506"          # LinkedIn versiona por YYYYMM y lo exige en cada llamada
+REDIRECT_URI = "http://localhost:8765/callback"
+SCOPES = ["openid", "profile", "email", "w_member_social"]
+
+# Los secretos viven en el Keychain de macOS, nunca en un archivo de texto.
+KC_CLIENT_ID = "PUBLISH_LINKEDIN_CLIENT_ID"
+KC_CLIENT_SECRET = "PUBLISH_LINKEDIN_CLIENT_SECRET"
+KC_TOKEN = "PUBLISH_LINKEDIN_TOKEN"
+
+# Caracteres reservados del formato "little text" de LinkedIn. Sin escapar,
+# el post se trunca o se deforma en silencio.
+# https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/little-text-format
+RESERVADOS = ["\\", "|", "{", "}", "[", "]", "<", ">", "*", "_", "~"]
+
+
+class ErrorLinkedIn(Exception):
+    """Falla esperable: sin token, token vencido, o la API respondió mal."""
+
+
+# --------------------------------------------------------------------------
+# Keychain
+# --------------------------------------------------------------------------
+
+def kc_leer(servicio: str) -> str | None:
+    r = subprocess.run(
+        ["security", "find-generic-password", "-s", servicio, "-w"],
+        capture_output=True, text=True,
+    )
+    return r.stdout.strip() or None if r.returncode == 0 else None
+
+
+def kc_guardar(servicio: str, valor: str) -> None:
+    subprocess.run(
+        ["security", "add-generic-password", "-U", "-s", servicio,
+         "-a", servicio, "-w", valor],
+        check=True, capture_output=True,
+    )
+
+
+def credenciales_app() -> tuple[str, str]:
+    cid, secret = kc_leer(KC_CLIENT_ID), kc_leer(KC_CLIENT_SECRET)
+    if not cid or not secret:
+        raise ErrorLinkedIn(
+            "Faltan credenciales de la app en el Keychain. "
+            "Corre: python auth.py guardar-credenciales"
+        )
+    return cid, secret
+
+
+def cargar_token() -> dict | None:
+    crudo = kc_leer(KC_TOKEN)
+    return json.loads(crudo) if crudo else None
+
+
+def guardar_token(token: dict) -> None:
+    kc_guardar(KC_TOKEN, json.dumps(token))
+
+
+def escapar(texto: str) -> str:
+    """Escapa los reservados. Deja pasar los hashtags (#palabra) intactos."""
+    for c in RESERVADOS:
+        texto = texto.replace(c, "\\" + c)
+    # '#' solo se escapa cuando NO abre un hashtag real
+    return re.sub(r"#(?![\w])", r"\\#", texto)
+
+
+# --------------------------------------------------------------------------
+# Cliente
+# --------------------------------------------------------------------------
+
+class LinkedIn:
+    def __init__(self, token: dict):
+        self.token = token
+        self._urn: str | None = None
+
+    @classmethod
+    def desde_keychain(cls) -> "LinkedIn":
+        token = cargar_token()
+        if not token:
+            raise ErrorLinkedIn("No hay token. Corre: python auth.py login")
+        if token.get("expires_at", 0) < time.time():
+            venc = time.strftime("%Y-%m-%d", time.localtime(token["expires_at"]))
+            raise ErrorLinkedIn(f"El token venció el {venc}. Corre: python auth.py login")
+        return cls(token)
+
+    def _headers(self) -> dict:
+        return {
+            "Authorization": f"Bearer {self.token['access_token']}",
+            "X-Restli-Protocol-Version": "2.0.0",
+            "LinkedIn-Version": API_VERSION,
+            "Content-Type": "application/json",
+        }
+
+    def quien_soy(self) -> dict:
+        r = requests.get(f"{API}/v2/userinfo", headers=self._headers(), timeout=20)
+        if r.status_code != 200:
+            raise ErrorLinkedIn(f"userinfo devolvió {r.status_code}: {r.text[:300]}")
+        d = r.json()
+        self._urn = f"urn:li:person:{d['sub']}"
+        return {"nombre": d.get("name"), "correo": d.get("email"), "urn": self._urn}
+
+    def publicar(self, texto: str, visibilidad: str = "PUBLIC") -> dict:
+        if not texto.strip():
+            raise ErrorLinkedIn("El texto está vacío.")
+        if len(texto) > 3000:
+            raise ErrorLinkedIn(f"El texto tiene {len(texto)} caracteres; el máximo es 3000.")
+        if self._urn is None:
+            self.quien_soy()
+
+        payload = {
+            "author": self._urn,
+            "commentary": escapar(texto),
+            "visibility": visibilidad,
+            "distribution": {
+                "feedDistribution": "MAIN_FEED",
+                "targetEntities": [],
+                "thirdPartyDistributionChannels": [],
+            },
+            "lifecycleState": "PUBLISHED",
+            "isReshareDisabledByAuthor": False,
+        }
+        r = requests.post(f"{API}/rest/posts", headers=self._headers(),
+                          json=payload, timeout=30)
+        if r.status_code != 201:
+            raise ErrorLinkedIn(f"LinkedIn respondió {r.status_code}: {r.text[:400]}")
+
+        urn = r.headers.get("x-restli-id", "")
+        return {
+            "urn": urn,
+            "url": f"https://www.linkedin.com/feed/update/{urn}/" if urn else None,
+            "caracteres": len(texto),
+            "visibilidad": visibilidad,
+        }
