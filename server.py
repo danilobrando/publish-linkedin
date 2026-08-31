@@ -21,7 +21,9 @@ from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 
-from linkedin import ErrorLinkedIn, LinkedIn, cargar_token, escapar
+from linkedin import (ErrorLinkedIn, LinkedIn, cargar_token,
+                      donde_viven_los_secretos, escapar, kc_leer,
+                      KC_CLIENT_ID)
 
 mcp = MCPServer("publish-linkedin")
 
@@ -40,15 +42,22 @@ def _registrar(linea: str) -> None:
 @mcp.tool()
 def linkedin_estado() -> str:
     """Revisa si hay un token de LinkedIn vigente y qué permisos tiene."""
+    if not kc_leer(KC_CLIENT_ID):
+        return ("✗ Todavía no hay credenciales de tu app de LinkedIn.\n"
+                "  En la terminal, dentro de la carpeta del proyecto:\n"
+                "    .venv/bin/python auth.py credenciales\n"
+                "  Las sacas de linkedin.com/developers/apps → pestaña Auth.")
     tok = cargar_token()
     if not tok:
-        return "✗ Sin token. En la terminal: python auth.py login"
+        return ("✗ Ya hay credenciales, pero falta autenticarte.\n"
+                "  En la terminal: .venv/bin/python auth.py login")
     quedan = tok["expires_at"] - time.time()
     venc = time.strftime("%Y-%m-%d %H:%M", time.localtime(tok["expires_at"]))
     if quedan <= 0:
         return f"✗ Token VENCIDO el {venc}. En la terminal: python auth.py login"
     return (f"✓ Token vigente hasta {venc} ({int(quedan / 86400)} días)\n"
             f"  Permisos: {', '.join(tok.get('scopes', []))}\n"
+            f"  Secretos en: {donde_viven_los_secretos()}\n"
             f"  Diario de auditoría: {DIARIO}")
 
 
