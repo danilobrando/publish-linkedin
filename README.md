@@ -15,6 +15,19 @@ Claude: ✓ Publicado. linkedin.com/feed/update/urn:li:share:…
 
 **El post sale en tu perfil personal**, con tu nombre y tu foto.
 
+## La forma más fácil de instalarlo
+
+Abre Claude Code en una carpeta vacía y pídele esto:
+
+```
+Instala https://github.com/danilobrando/publish-linkedin siguiendo su README
+y guíame hasta que pueda publicar.
+```
+
+Él lee las instrucciones de este archivo, hace lo que le toca a él y te dice
+exactamente qué te toca a ti. Si prefieres a mano, están los
+[cuatro pasos manuales](#instalación-manual-si-prefieres-no-usar-el-agente) más abajo.
+
 ## Por qué existe
 
 Existe `southleft/linkedin-mcp`: 87 herramientas, MIT, buen trabajo. Se
@@ -32,7 +45,139 @@ confías a ciegas.
 
 ---
 
-# Instalación
+# 🤖 Si eres Claude Code (o cualquier agente): lee esto primero
+
+El usuario te pidió instalar este repo. **Guíalo hasta que publique**, no solo hasta que
+instale. Sigue estos pasos en orden y no te saltes ninguna verificación.
+
+## Reglas que no puedes romper
+
+| | |
+|---|---|
+| ❌ **Nunca** corras `auth.py credenciales` | Usa `input()` y `getpass()`. Se te cuelga la terminal. **Lo corre el usuario.** |
+| ❌ **Nunca** corras `auth.py login` | Abre el navegador y espera un clic humano. **Lo corre el usuario.** |
+| ❌ **Nunca** pidas ni recibas el Client Secret por el chat | Va tecleado directo en la terminal del usuario. Si te lo pega, dile que lo rote. |
+| ✅ Sí corres | `git clone`, crear el entorno, instalar dependencias, `claude mcp add`, `auth.py estado` |
+
+**Cuando llegues a un paso del usuario:** dale el comando exacto, dile que lo corra **en su
+propia terminal**, y **espera** a que te diga que terminó. No sigas de largo.
+
+## Paso 1 — Instalar *(lo haces tú)*
+
+Detecta el sistema operativo y usa la rama correcta.
+
+**macOS / Linux:**
+```bash
+git clone https://github.com/danilobrando/publish-linkedin.git
+cd publish-linkedin
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+**Windows:**
+```
+git clone https://github.com/danilobrando/publish-linkedin.git
+cd publish-linkedin
+py -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+```
+
+> ⚠️ El entorno **tiene que llamarse `.venv`** y estar dentro del repo. El paso 4 depende
+> de esa ruta exacta. No uses `uv`, `conda`, ni un entorno global aunque estén disponibles.
+
+**Verifica antes de seguir** (macOS/Linux · en Windows `.venv\Scripts\python`):
+```bash
+.venv/bin/python -c "import mcp, requests; print('OK')"
+```
+Si no imprime `OK`, arregla eso antes de continuar.
+
+## Paso 2 — Credenciales *(lo hace el usuario)*
+
+Pregúntale al usuario cuál es su caso:
+
+- **«Estoy en un curso / me dieron credenciales»** → que las tenga a mano y siga.
+- **«Voy por mi cuenta»** → mándalo primero a la sección
+  [Crear tu propia app](#crear-tu-propia-app) de este mismo archivo. Necesita administrar
+  una Página de LinkedIn. Recién cuando tenga Client ID y Secret, vuelve aquí.
+
+Dile que corra **en su terminal**, dentro de la carpeta del repo:
+
+```bash
+.venv/bin/python auth.py credenciales
+```
+
+Le va a pedir **Client ID** (se ve al escribir) y **Client Secret** (no se ve, es normal).
+
+**Espera a que te confirme.** Después verifica tú:
+```bash
+.venv/bin/python auth.py estado
+```
+Debe decir que hay credenciales pero que falta el token. Si dice
+`Todavía no hay credenciales`, el paso 2 no se completó — no sigas.
+
+## Paso 3 — Autorizar *(lo hace el usuario)*
+
+Dile que corra **en su terminal**:
+
+```bash
+.venv/bin/python auth.py login
+```
+
+Adviértele **antes** de que lo corra:
+- Se le abre el navegador con su sesión de LinkedIn. Tiene que darle **Allow**.
+- Tiene 2 minutos. Si se pasa, simplemente lo vuelve a correr.
+
+**Espera.** Después verifica tú:
+```bash
+.venv/bin/python auth.py estado
+```
+Tiene que salir **el nombre del usuario** y una fecha de vencimiento (~60 días). Si sale
+un error, búscalo en la tabla [Cuando algo falle](#cuando-algo-falle) de este archivo y
+resuélvelo antes de seguir.
+
+## Paso 4 — Conectar el servidor *(lo haces tú)*
+
+Desde la carpeta del repo:
+
+```bash
+claude mcp add publish-linkedin --scope user \
+  -e PYTHONPATH=$PWD -- $PWD/.venv/bin/python $PWD/server.py
+```
+
+En **Windows** usa rutas absolutas explícitas en vez de `$PWD` (PowerShell: `$PWD` sirve;
+`cmd` no). Verifica con `claude mcp list` que aparezca `publish-linkedin ✔ Connected`.
+
+Después dile al usuario, con estas palabras:
+
+> **Cierra y vuelve a abrir Claude Code.** Los servidores MCP se cargan al arrancar. Si no
+> reinicias, las herramientas no aparecen y vas a creer que algo salió mal.
+
+## Paso 5 — Primera publicación *(después del reinicio)*
+
+Ya reiniciado, verifica con la herramienta `linkedin_quien_soy`. Debe devolver el nombre
+del usuario.
+
+Después dile:
+
+> Pídeme que publique algo. **La primera vez no voy a publicar**: te muestro un ensayo con
+> el texto exacto que saldría. Solo publico cuando tú confirmes.
+
+Cuando te pida publicar:
+1. Llama `linkedin_publicar` **sin** `confirmar` (o con `confirmar=False`). Muéstrale el ensayo completo.
+2. **Espera su confirmación explícita.** No la asumas, no la interpretes de un «dale» ambiguo.
+3. Solo entonces vuelve a llamar con `confirmar=True` y dale la URL.
+
+Si se arrepiente, `linkedin_borrar` con el URN que devolviste.
+
+## Si algo falla en cualquier paso
+
+Busca el síntoma en la tabla [Cuando algo falle](#cuando-algo-falle) de este archivo antes
+de improvisar. Si no está ahí, dile al usuario qué falló en una frase, sin jerga, y qué
+vas a intentar.
+
+---
+
+# Instalación *(manual, si prefieres no usar el agente)*
 
 Cuatro pasos. Solo necesitas **Python 3.11 o más nuevo**.
 
