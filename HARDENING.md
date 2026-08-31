@@ -7,8 +7,8 @@ lo escrito se bota, falta lo de abajo.
 
 ## Ya cumple
 
-- [x] Config por entorno (`PUBLISH_LINKEDIN_LOG`)
-- [x] Secretos fuera del código (Keychain de macOS)
+- [x] Config por entorno (`PUBLISH_LINKEDIN_LOG`, `PUBLISH_LINKEDIN_HOME`)
+- [x] Secretos fuera del código (Keychain en macOS · archivo 0600 en Windows/Linux)
 - [x] Diario de auditoría de toda publicación
 - [x] Anti-CSRF: validación del `state` de OAuth
 - [x] Freno de mano (ensayo por defecto, `confirmar=True` para publicar)
@@ -29,10 +29,10 @@ lo escrito se bota, falta lo de abajo.
 - [ ] **Idempotencia.** Hash del texto en el diario; rechazar republicar el
       mismo contenido dentro de 24h. Es el fallo más caro: duplicar en
       público.
-- [ ] **Borrar las credenciales en texto plano** de
-      `/Users/dannybravo/second-brain/.mcp.json` (permisos 644). Ya están en
-      el Keychain. Ese archivo no está en git — el riesgo es local, no
-      publicado.
+- [ ] **Borrar las credenciales en texto plano** del `.mcp.json` heredado de
+      la configuración anterior (quedan con permisos 644). Ya están en el
+      almacén seguro. El riesgo es local, no publicado — pero aparece en
+      pantalla si alguna vez compartes ese archivo.
 
 ## Falta — P1
 
@@ -45,7 +45,8 @@ lo escrito se bota, falta lo de abajo.
 - [ ] LaunchAgent para la publicación programada
 - [ ] Review de 5 expertos (Charity, Aaron, Simon, Allspaw, Filippo) → P0+P1
 - [ ] Review de productización (Adam, Mitchell, Mike)
-- [ ] Repo `danilobrando/publish-linkedin`, privado, MIT, tag v0.1.0-alpha
+- [x] Repo `danilobrando/publish-linkedin`, MIT — público desde el 31-ago-2026
+      para la cohorte. Ojo: público adelanta el hardening de abajo.
 
 ## Decisión pendiente
 

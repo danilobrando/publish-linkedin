@@ -11,9 +11,14 @@ navegador: eso vive en zona gris de los términos de LinkedIn.
 from __future__ import annotations
 
 import json
+import os
+import platform
 import re
+import stat
 import subprocess
+import sys
 import time
+from pathlib import Path
 
 import requests
 
@@ -41,23 +46,55 @@ class ErrorLinkedIn(Exception):
 
 
 # --------------------------------------------------------------------------
-# Keychain
+# Almacén de secretos
+#
+# En macOS: Keychain, que es lo correcto.
+# Fuera de macOS: archivo en ~/.config con permisos 0600 (solo tu usuario).
+# No es tan bueno como el Keychain, pero es honesto y funciona en Windows y
+# Linux. La alternativa —dejar el secreto en un .json legible por todos— es
+# peor, y es exactamente lo que este servidor existe para evitar.
 # --------------------------------------------------------------------------
 
+ES_MACOS = platform.system() == "Darwin"
+DIR_SECRETOS = Path(
+    os.environ.get("PUBLISH_LINKEDIN_HOME", Path.home() / ".config" / "publish-linkedin")
+)
+
+
+def _ruta_secreto(servicio: str) -> Path:
+    return DIR_SECRETOS / f"{servicio}.secret"
+
+
 def kc_leer(servicio: str) -> str | None:
-    r = subprocess.run(
-        ["security", "find-generic-password", "-s", servicio, "-w"],
-        capture_output=True, text=True,
-    )
-    return r.stdout.strip() or None if r.returncode == 0 else None
+    if ES_MACOS:
+        r = subprocess.run(
+            ["security", "find-generic-password", "-s", servicio, "-w"],
+            capture_output=True, text=True,
+        )
+        return r.stdout.strip() or None if r.returncode == 0 else None
+    f = _ruta_secreto(servicio)
+    if not f.exists():
+        return None
+    return f.read_text(encoding="utf-8").strip() or None
 
 
 def kc_guardar(servicio: str, valor: str) -> None:
-    subprocess.run(
-        ["security", "add-generic-password", "-U", "-s", servicio,
-         "-a", servicio, "-w", valor],
-        check=True, capture_output=True,
-    )
+    if ES_MACOS:
+        subprocess.run(
+            ["security", "add-generic-password", "-U", "-s", servicio,
+             "-a", servicio, "-w", valor],
+            check=True, capture_output=True,
+        )
+        return
+    DIR_SECRETOS.mkdir(parents=True, exist_ok=True)
+    os.chmod(DIR_SECRETOS, 0o700)
+    f = _ruta_secreto(servicio)
+    f.write_text(valor, encoding="utf-8")
+    os.chmod(f, 0o600)
+
+
+def donde_viven_los_secretos() -> str:
+    return "Keychain de macOS" if ES_MACOS else f"{DIR_SECRETOS} (permisos 0600)"
 
 
 def credenciales_app() -> tuple[str, str]:
@@ -65,7 +102,7 @@ def credenciales_app() -> tuple[str, str]:
     if not cid or not secret:
         raise ErrorLinkedIn(
             "Faltan credenciales de la app en el Keychain. "
-            "Corre: python auth.py guardar-credenciales"
+            "Corre: python auth.py credenciales"
         )
     return cid, secret
 

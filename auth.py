@@ -1,14 +1,17 @@
 """
 Autenticación con LinkedIn. Tres comandos:
 
-    python auth.py importar    # trae client_id/secret al Keychain (una vez)
-    python auth.py login       # abre el navegador, tú das Allow, guarda el token
-    python auth.py estado      # ¿tengo token? ¿hasta cuándo?
+    python auth.py credenciales  # pega el client_id/secret de tu app → Keychain
+    python auth.py login         # abre el navegador, tú das Allow, guarda el token
+    python auth.py estado        # ¿tengo token? ¿hasta cuándo?
+
+    python auth.py importar [ruta]   # (opcional) migra credenciales desde un .mcp.json
 
 El token se guarda en el Keychain de macOS, no en un archivo.
 """
 from __future__ import annotations
 
+import getpass
 import http.server
 import json
 import secrets
@@ -47,16 +50,41 @@ class _Callback(http.server.BaseHTTPRequestHandler):
         pass
 
 
-def importar_desde_mcp_json(ruta: str = "/Users/dannybravo/second-brain/.mcp.json") -> None:
-    """Migra las credenciales que hoy están en texto plano hacia el Keychain."""
+def credenciales() -> None:
+    """Pide el Client ID y el Secret de tu app y los guarda en el Keychain.
+
+    Se piden por teclado a propósito: pasarlos como argumento los dejaría
+    guardados en el historial del shell.
+    """
+    print("Los encuentras en https://www.linkedin.com/developers/apps → pestaña Auth\n")
+    cid = input("Client ID: ").strip()
+    secret = getpass.getpass("Client Secret (no se ve al escribir): ").strip()
+    if not cid or not secret:
+        print("✗ Ambos son obligatorios.")
+        sys.exit(1)
+    kc_guardar(KC_CLIENT_ID, cid)
+    kc_guardar(KC_CLIENT_SECRET, secret)
+    print(f"\n✓ Guardadas en el Keychain (client_id …{cid[-4:]})")
+    print("  Siguiente: python auth.py login")
+
+
+def importar_desde_mcp_json(ruta: str | None = None) -> None:
+    """Migra credenciales que ya estén en un .mcp.json hacia el Keychain.
+
+    Solo sirve si ya tenías el servidor configurado con las credenciales en
+    texto plano. Si vienes de cero, usa `credenciales`.
+    """
+    ruta = ruta or (sys.argv[2] if len(sys.argv) > 2 else "")
+    if not ruta:
+        print("✗ Falta la ruta: python auth.py importar /ruta/al/.mcp.json")
+        print("  Si vienes de cero, usa: python auth.py credenciales")
+        sys.exit(1)
     try:
         env = json.load(open(ruta))["mcpServers"]["linkedin"]["env"]
         cid, secret = env["LINKEDIN_CLIENT_ID"], env["LINKEDIN_CLIENT_SECRET"]
-    except (OSError, KeyError) as e:
+    except (OSError, KeyError, json.JSONDecodeError) as e:
         print(f"✗ No pude leer credenciales de {ruta}: {e}")
-        print("  Guárdalas a mano:")
-        print(f'  security add-generic-password -U -s {KC_CLIENT_ID} -a {KC_CLIENT_ID} -w "TU_ID"')
-        print(f'  security add-generic-password -U -s {KC_CLIENT_SECRET} -a {KC_CLIENT_SECRET} -w "TU_SECRET"')
+        print("  Usa mejor: python auth.py credenciales")
         sys.exit(1)
     kc_guardar(KC_CLIENT_ID, cid)
     kc_guardar(KC_CLIENT_SECRET, secret)
@@ -132,6 +160,9 @@ def estado() -> None:
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "estado"
-    {"importar": importar_desde_mcp_json, "login": login, "estado": estado}.get(
-        cmd, lambda: print(f"Comando desconocido: {cmd}\nUsa: importar | login | estado")
+    {"credenciales": credenciales, "importar": importar_desde_mcp_json,
+     "login": login, "estado": estado}.get(
+        cmd,
+        lambda: print(f"Comando desconocido: {cmd}\n"
+                      "Usa: credenciales | login | estado | importar <ruta>")
     )()
