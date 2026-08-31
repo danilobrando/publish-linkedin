@@ -34,22 +34,35 @@ confías a ciegas.
 
 # Instalación
 
-Cuatro pasos. Necesitas **Python 3.11+** y [uv](https://github.com/astral-sh/uv).
+Cuatro pasos. Solo necesitas **Python 3.11 o más nuevo**.
 
 ## 1 · Clonar e instalar
 
 ```bash
 git clone https://github.com/danilobrando/publish-linkedin.git
 cd publish-linkedin
-uv venv --python 3.12
-uv pip install -r requirements.txt
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
 ```
+
+En **Windows**, las dos últimas líneas son:
+
+```
+py -m venv .venv
+.venv\Scripts\pip install -r requirements.txt
+```
+
+> Si ya tienes [uv](https://github.com/astral-sh/uv), sirve igual y es más rápido:
+> `uv venv --python 3.12 && uv pip install -r requirements.txt`.
+> **No hace falta instalarlo solo para esto** — probado con `venv` y `pip` normales.
 
 ## 2 · Guardar las credenciales de la app
 
 ```bash
 .venv/bin/python auth.py credenciales
 ```
+
+*(en Windows: `.venv\Scripts\python auth.py credenciales` — y así en todos los que siguen)*
 
 Te pide un **Client ID** y un **Client Secret**, que identifican a la
 aplicación que pide permiso — no a ti.
