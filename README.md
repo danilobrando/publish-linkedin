@@ -2,7 +2,7 @@
 
 Servidor MCP mínimo para publicar en LinkedIn desde tu Second Brain.
 
-Cuatro herramientas. ~470 líneas que puedes leer completas. API oficial de
+Cuatro herramientas. ~490 líneas que puedes leer completas. API oficial de
 LinkedIn (OAuth 2.0, scope `w_member_social`) — **sin cookies del navegador**,
 que es la zona gris de los términos de servicio.
 
@@ -12,6 +12,8 @@ Claude: [ensayo] esto es lo que saldría. ¿Confirmas?
 tú: "sí"
 Claude: ✓ Publicado. linkedin.com/feed/update/urn:li:share:…
 ```
+
+**El post sale en tu perfil personal**, con tu nombre y tu foto.
 
 ## Por qué existe
 
@@ -30,55 +32,11 @@ confías a ciegas.
 
 ---
 
-# Instalación, de cero
+# Instalación
 
-Son cinco pasos. El primero es el único que puede trabarte.
+Cuatro pasos. Necesitas **Python 3.11+** y [uv](https://github.com/astral-sh/uv).
 
-## 1 · Crear la app en LinkedIn Developer
-
-Ve a **[linkedin.com/developers/apps](https://www.linkedin.com/developers/apps)**
-y dale *Create app*.
-
-> ⚠️ **La trampa #1: LinkedIn te va a exigir una Página de Empresa.**
-> No se puede crear una app sin asociarle una. Si no tienes una,
-> [créala primero](https://www.linkedin.com/company/setup/new/) — puede ser
-> mínima, con tu nombre, y sirve. Tienes que ser **administrador** de esa
-> página: después de crear la app, LinkedIn te pide *verificarla* con un
-> enlace que solo un admin puede aprobar. Sin ese clic, la app no sirve.
-
-Una vez creada:
-
-**Pestaña `Products`** — pide acceso a estos dos. Ambos son **aprobación
-instantánea**, no hay que esperar a nadie:
-
-| Producto | Para qué |
-|---|---|
-| `Share on LinkedIn` | Publicar. Es el que importa. |
-| `Sign In with LinkedIn using OpenID Connect` | Saber quién eres al autenticar. |
-
-> No pidas *Community Management API* ni *Ad Library*: esos sí requieren
-> revisión humana de LinkedIn y pueden tardar días. **No los necesitas para
-> publicar.**
-
-**Pestaña `Auth`**:
-
-1. Copia el **Client ID** y el **Client Secret**.
-2. En *OAuth 2.0 settings → Redirect URLs*, agrega exactamente:
-   ```
-   http://localhost:8765/callback
-   ```
-
-> ⚠️ **La trampa #2: esa URL tiene que ser idéntica.** Sin `https`, sin barra
-> al final, con ese puerto. Un carácter de más y el login falla con un error
-> que no explica nada.
-
-> 🔒 **El Client Secret es una contraseña.** No lo pegues en un chat, no lo
-> subas a git, no lo muestres en una pantalla compartida. Si se te escapa,
-> vuelve a la pestaña `Auth` y genera uno nuevo.
-
-## 2 · Instalar
-
-Necesitas **Python 3.11+** y [uv](https://github.com/astral-sh/uv).
+## 1 · Clonar e instalar
 
 ```bash
 git clone https://github.com/danilobrando/publish-linkedin.git
@@ -87,44 +45,55 @@ uv venv --python 3.12
 uv pip install -r requirements.txt
 ```
 
-## 3 · Guardar las credenciales
+## 2 · Guardar las credenciales de la app
 
 ```bash
 .venv/bin/python auth.py credenciales
 ```
 
-Te pide el Client ID y el Secret por teclado (el secret no se ve mientras
-escribes, y así no queda en el historial del shell).
+Te pide un **Client ID** y un **Client Secret**, que identifican a la
+aplicación que pide permiso — no a ti.
+
+> 🎓 **Si estás en un curso:** pide esas dos credenciales a quien lo dicta.
+> Una misma aplicación puede servir a todo el salón: cada persona autoriza
+> por su lado y publica en su propio perfil. **No van en este repo.**
+>
+> **Si vas por tu cuenta:** necesitas crear tu propia app.
+> Ver [Crear tu propia app](#crear-tu-propia-app) abajo.
+
+Se piden por teclado a propósito: pasarlas como argumento las dejaría en el
+historial del shell.
 
 - **macOS** → van al Keychain.
 - **Windows y Linux** → a `~/.config/publish-linkedin/`, con permisos 0600.
 
-## 4 · Autenticarte
+## 3 · Autenticarte
 
 ```bash
 .venv/bin/python auth.py login
 ```
 
-Se abre el navegador. Le das **Allow**. Vuelve solo.
+Se abre el navegador **con tu sesión de LinkedIn**. Le das **Allow**. Eso
+crea un token que es tuyo y solo publica en tu perfil.
 
 ```bash
 .venv/bin/python auth.py estado
 ```
 
-Debe decir el nombre de tu cuenta y hasta cuándo dura el token (~60 días).
+Debe decir tu nombre y hasta cuándo dura el token (~60 días).
 
-> ⚠️ **La trampa #3: el token vence y no avisa.** Cuando falle dentro de dos
-> meses, el mensaje te va a decir la fecha exacta y qué correr. No es un bug.
+> ⚠️ **El token vence y no avisa.** Cuando falle dentro de dos meses, el
+> mensaje te va a decir la fecha exacta y qué correr. No es un bug.
 
-## 5 · Conectarlo a Claude Code
+## 4 · Conectarlo a Claude Code
 
 ```bash
 claude mcp add publish-linkedin --scope user \
   -e PYTHONPATH=$PWD -- $PWD/.venv/bin/python $PWD/server.py
 ```
 
-**Cierra y vuelve a abrir Claude Code.** Los servidores MCP se cargan al
-arrancar; si no reinicias, no aparecen.
+> ⚠️ **Cierra y vuelve a abrir Claude Code.** Los servidores MCP se cargan al
+> arrancar; si no reinicias, no aparecen y vas a creer que te equivocaste.
 
 Verifica pidiéndole a Claude: *"¿cuál es mi estado de LinkedIn?"*
 
@@ -156,16 +125,67 @@ autonomía — es un accidente esperando su turno.
 - Toda publicación —ensayo, fallo o real— queda en el diario de auditoría:
   `~/.config/publish-linkedin/publicaciones.log` (override: `PUBLISH_LINKEDIN_LOG`).
 
+### Si compartes una app con varias personas
+
+Es válido y es como funciona OAuth: la app pide permiso, cada persona lo
+concede por separado, y cada token solo sirve para quien lo autorizó. **Nadie
+puede publicar en el perfil de otro.** Dicho eso, dos cosas que conviene saber:
+
+- El Client Secret **es una contraseña de la app**. Quien lo administra debe
+  poder rotarlo (pestaña `Auth` del portal, un clic) y hacerlo cuando el grupo
+  deje de necesitarlo.
+- LinkedIn limita por app además de por persona. Si mucha gente publica en el
+  mismo minuto, van a ver un `429`. El mensaje lo explica y dice cuánto esperar.
+
 ## Cuando algo falle
 
 | Síntoma | Qué pasó |
 |---|---|
-| `Faltan credenciales de la app` | No corriste el paso 3 |
+| `Todavía no hay credenciales` | Falta el paso 2 |
 | `No hay token` / `El token venció` | Corre `auth.py login` otra vez |
-| El navegador dice `redirect_uri` inválido | Trampa #2: la URL no coincide con la de la pestaña `Auth` |
-| `403` al publicar | Falta el producto `Share on LinkedIn` en la pestaña `Products` |
+| El navegador dice `redirect_uri` inválido | La app no tiene registrada `http://localhost:8765/callback` |
+| `429` | Límite de LinkedIn. Espera lo que diga el mensaje |
+| `401` / `403` al publicar | Token vencido, o falta el producto `Share on LinkedIn` en la app |
 | `426 NONEXISTENT_VERSION` | LinkedIn retiró la versión de API. El código la renegocia solo y reintenta una vez |
-| Claude no ve las herramientas | No reiniciaste Claude Code después del paso 5 |
+| Claude no ve las herramientas | No reiniciaste Claude Code después del paso 4 |
+
+---
+
+## Crear tu propia app
+
+Solo si quieres tu propia aplicación en vez de usar una compartida.
+
+Ve a **[linkedin.com/developers/apps](https://www.linkedin.com/developers/apps)**
+→ *Create app*.
+
+> ⚠️ **LinkedIn te va a exigir una Página de LinkedIn.** No se puede crear una
+> app sin asociarle una, y un *super admin* de esa página tiene que aprobar la
+> verificación con un enlace. Si administras alguna, úsala. Si no, este es el
+> punto donde conviene pedir prestadas las credenciales de una app existente
+> en vez de crear una página solo para esto.
+>
+> **La Página no es donde sale el post.** El post sale en tu perfil personal.
+> La página solo figura como "editor" de la app en el portal. Es papeleo.
+
+**Pestaña `Products`** — pide estos dos. Ambos son **aprobación instantánea**:
+
+| Producto | Para qué |
+|---|---|
+| `Share on LinkedIn` | Publicar. Es el que importa. |
+| `Sign In with LinkedIn using OpenID Connect` | Saber quién eres al autenticar. |
+
+No pidas *Community Management API* ni *Ad Library*: esos sí requieren revisión
+humana de LinkedIn y tardan días. **No los necesitas para publicar.**
+
+**Pestaña `Auth`**:
+
+1. Copia el **Client ID** y el **Client Secret**.
+2. En *OAuth 2.0 settings → Redirect URLs*, agrega exactamente:
+   ```
+   http://localhost:8765/callback
+   ```
+   Sin `https`, sin barra al final, con ese puerto. Un carácter de más y el
+   login falla con un error que no explica nada.
 
 ## Archivos
 
@@ -177,8 +197,7 @@ autonomía — es un accidente esperando su turno.
 
 ## Pendiente
 
-Ver `HARDENING.md` — esto es el mínimo que publica, no el estándar de
-conector completo. Lo más importante que falta: idempotencia (evitar publicar
+Ver `HARDENING.md`. Lo más importante que falta: idempotencia (evitar publicar
 dos veces el mismo texto) y aviso antes de que venza el token.
 
 MIT.

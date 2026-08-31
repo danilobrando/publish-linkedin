@@ -68,7 +68,7 @@ def linkedin_quien_soy() -> str:
         yo = LinkedIn.desde_keychain().quien_soy()
     except ErrorLinkedIn as e:
         return f"✗ {e}"
-    return f"✓ {yo['nombre']} · {yo['correo']}\n  {yo['urn']}"
+    return f"✓ {yo['nombre']}\n  {yo['urn']}"
 
 
 @mcp.tool()

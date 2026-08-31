@@ -183,7 +183,8 @@ class LinkedIn:
             raise ErrorLinkedIn(f"userinfo devolvió {r.status_code}: {r.text[:300]}")
         d = r.json()
         self._urn = f"urn:li:person:{d['sub']}"
-        return {"nombre": d.get("name"), "correo": d.get("email"), "urn": self._urn}
+        # El correo NO se devuelve: esta salida se proyecta en pantalla.
+        return {"nombre": d.get("name"), "urn": self._urn}
 
     def publicar(self, texto: str, visibilidad: str = "PUBLIC") -> dict:
         if not texto.strip():
@@ -218,6 +219,21 @@ class LinkedIn:
             r = requests.post(f"{API}/rest/posts", headers=self._headers(),
                               json=payload, timeout=30)
 
+        # LinkedIn limita por app y por miembro. Con muchas personas usando la
+        # misma app, esto se ve — y el mensaje crudo no dice qué hacer.
+        if r.status_code == 429:
+            espera = r.headers.get("Retry-After")
+            cuanto = f" Reintenta en {espera} segundos." if espera else " Espera unos minutos."
+            raise ErrorLinkedIn(
+                "LinkedIn está limitando las publicaciones (429)." + cuanto +
+                " No es un error tuyo: es el límite de la app o de tu cuenta."
+            )
+        if r.status_code in (401, 403):
+            raise ErrorLinkedIn(
+                f"LinkedIn rechazó el permiso ({r.status_code}). Revisa dos cosas: "
+                "que el token no haya vencido (auth.py estado) y que la app tenga "
+                f"activo el producto 'Share on LinkedIn'. Respuesta: {r.text[:200]}"
+            )
         if r.status_code != 201:
             raise ErrorLinkedIn(f"LinkedIn respondió {r.status_code}: {r.text[:400]}")
 
