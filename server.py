@@ -74,8 +74,10 @@ def linkedin_quien_soy() -> str:
 
 @mcp.tool()
 def linkedin_publicar(texto: str, confirmar: bool = False,
-                      visibilidad: str = "PUBLIC") -> str:
-    """Publica un post en LinkedIn.
+                      visibilidad: str = "PUBLIC",
+                      adjunto: str | None = None,
+                      titulo: str | None = None) -> str:
+    """Publica un post en LinkedIn, con o sin imagen o PDF.
 
     FRENO DE MANO: con confirmar=False (el default) NO publica — hace un
     ensayo y devuelve exactamente qué se enviaría. Solo publica de verdad
@@ -85,7 +87,19 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
         texto: el post. Máximo 3000 caracteres.
         confirmar: True para publicar de verdad. False = ensayo.
         visibilidad: PUBLIC (todos) o CONNECTIONS (solo contactos).
+        adjunto: ruta a UNA imagen (.jpg .png .gif) o UN documento
+            (.pdf .pptx .docx). Un solo adjunto por post.
+        titulo: para imágenes es el texto alternativo (accesibilidad);
+            para documentos es el nombre que LinkedIn muestra en el feed.
     """
+    linea_adjunto = ""
+    if adjunto:
+        from medios import ErrorMedio, descripcion
+        try:
+            linea_adjunto = descripcion(adjunto)
+        except ErrorMedio as e:
+            return f"✗ {e}"
+
     if visibilidad not in ("PUBLIC", "CONNECTIONS"):
         return f"✗ Visibilidad inválida: {visibilidad}. Usa PUBLIC o CONNECTIONS."
     if len(texto) > 3000:
@@ -94,7 +108,7 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
         return "✗ El texto está vacío."
 
     if not confirmar:
-        previo = R.ya_publicado(texto)
+        previo = R.ya_publicado(texto + ("\n@@" + str(adjunto) if adjunto else ""))
         _esc = escapar(texto)
         R.registrar("ENSAYO", chars=len(texto), visibilidad=visibilidad,
                     huella=R.huella(texto))
@@ -104,7 +118,9 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
                      f"    {previo.get('urn', '')}\n"
                      f"    Si confirmas, me voy a negar. Cambia el texto, o borra el "
                      f"anterior con linkedin_borrar.\n")
+        adj = f"Con adjunto → {linea_adjunto}\n" if linea_adjunto else ""
         return (f"⏸  ENSAYO — no se publicó nada.\n{aviso}\n"
+                f"{adj}"
                 f"Se enviaría a LinkedIn ({visibilidad}, {len(texto)}/3000 caracteres):\n"
                 f"{'─' * 60}\n{texto}\n{'─' * 60}\n"
                 f"Tal como lo recibe la API (con reservados escapados):\n"
@@ -119,12 +135,14 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
                 "  Sin ese archivo no hay protección contra publicar dos veces "
                 "lo mismo. Corre linkedin_doctor para ver cómo arreglarlo.")
 
-    h = R.huella(texto)
+    # El adjunto entra en la huella: el mismo texto con otra imagen es otro
+    # post, y bloquearlo por duplicado sería un falso positivo.
+    h = R.huella(texto + ("\n@@" + str(adjunto) if adjunto else ""))
     try:
         with R.Lock(f"publicar {len(texto)}c"):
             # La idempotencia se revisa DENTRO del lock: fuera, dos procesos
             # podían leer "no hay duplicado" a la vez y publicar los dos.
-            previo = R.ya_publicado(texto)
+            previo = R.ya_publicado(texto + ("\n@@" + str(adjunto) if adjunto else ""))
             if previo:
                 R.registrar("DUPLICADO_BLOQUEADO", huella=h,
                             urn_previo=previo.get("urn", ""))
@@ -147,8 +165,8 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
                         f"quieres publicar más.")
 
             R.registrar("INTENTO", huella=h, chars=len(texto), visibilidad=visibilidad,
-                        extracto=texto[:120])
-            r = LinkedIn.desde_keychain().publicar(texto, visibilidad)
+                        adjunto=linea_adjunto or None, extracto=texto[:120])
+            r = LinkedIn.desde_keychain().publicar(texto, visibilidad, adjunto, titulo)
     except R.BloqueadoError as e:
         R.registrar("BLOQUEADO", huella=h, motivo=str(e))
         return f"✗ {e}"
@@ -165,12 +183,13 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
                 f"  Diagnostica con linkedin_doctor.")
 
     R.registrar("PUBLICADO", urn=r["urn"], chars=r["caracteres"],
-                visibilidad=r["visibilidad"], huella=h,
+                visibilidad=r["visibilidad"], huella=h, adjunto=r.get("adjunto"),
                 extracto=texto[:120], simulacro=bool(r.get("simulacro")))
+    con = f"\n  Con {r['adjunto']}: {linea_adjunto}" if r.get("adjunto") else ""
     if r.get("simulacro"):
         return (f"🧪 SIMULACRO — no se tocó LinkedIn (PUBLISH_LINKEDIN_SIMULACRO activo).\n"
-                f"  URN falso: {r['urn']}")
-    return f"✓ Publicado.\n  {r['url']}\n  {r['urn']}"
+                f"  URN falso: {r['urn']}{con}")
+    return f"✓ Publicado.\n  {r['url']}\n  {r['urn']}{con}"
 
 
 @mcp.tool()

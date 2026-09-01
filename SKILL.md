@@ -60,6 +60,16 @@ propia terminal, y espera a que confirme.
 
 Nunca pidas ni aceptes el Client Secret por el chat.
 
+## Adjuntar imagen o PDF
+
+`linkedin_publicar` acepta `adjunto` (ruta a UN archivo) y `titulo`.
+
+- Imágenes `.jpg .png .gif` hasta 10 MB · documentos `.pdf .pptx .docx` hasta 100 MB.
+- `titulo` es **texto alternativo** en imágenes y **nombre visible** en documentos.
+- El ensayo muestra qué adjunto saldría. Enséñaselo al usuario antes de confirmar.
+- Si el usuario menciona un archivo, **pregúntale la ruta**: no la adivines ni
+  uses la primera coincidencia de un `ls`.
+
 ## Publicar
 
 `linkedin_publicar` **no publica** sin `confirmar=True`. Siempre:

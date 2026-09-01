@@ -290,7 +290,8 @@ class LinkedIn:
         # El correo NO se devuelve: esta salida se proyecta en pantalla.
         return {"nombre": d.get("name"), "urn": self._urn}
 
-    def publicar(self, texto: str, visibilidad: str = "PUBLIC") -> dict:
+    def publicar(self, texto: str, visibilidad: str = "PUBLIC",
+                 adjunto: str | None = None, titulo: str | None = None) -> dict:
         if not texto.strip():
             raise ErrorLinkedIn("El texto está vacío.")
         # LinkedIn cuenta el texto YA escapado. Un post lleno de reservados
@@ -304,10 +305,34 @@ class LinkedIn:
         if self._urn is None:
             self.quien_soy()
 
+        # El adjunto se valida SIEMPRE, incluso en simulacro: así una ruta mala
+        # o un archivo demasiado pesado se detectan probando, no publicando.
+        clase_adjunto = None
+        if adjunto:
+            from medios import ErrorMedio, clasificar, subir
+            try:
+                _, clase_adjunto, _ = clasificar(adjunto)
+            except ErrorMedio as e:
+                raise ErrorLinkedIn(str(e)) from e
+
         if SIMULACRO:
             falso = f"urn:li:share:SIMULACRO{abs(hash(texto)) % 10**16}"
             return {"urn": falso, "url": None, "caracteres": len(texto),
-                    "visibilidad": visibilidad, "simulacro": True}
+                    "visibilidad": visibilidad, "simulacro": True,
+                    "adjunto": clase_adjunto}
+
+        contenido = None
+        if adjunto:
+            urn_medio, clase_adjunto = subir(
+                self._headers(), API, self._urn, adjunto, self.token["access_token"])
+            # Las imágenes llevan altText (accesibilidad); los documentos, title
+            # (es lo que LinkedIn muestra como nombre del PDF en el feed).
+            if clase_adjunto == "imagen":
+                contenido = {"media": {"id": urn_medio, "altText": titulo or ""}}
+            else:
+                from pathlib import Path as _P
+                contenido = {"media": {"id": urn_medio,
+                                       "title": titulo or _P(adjunto).stem}}
 
         payload = {
             "author": self._urn,
@@ -321,6 +346,8 @@ class LinkedIn:
             "lifecycleState": "PUBLISHED",
             "isReshareDisabledByAuthor": False,
         }
+        if contenido:
+            payload["content"] = contenido
         r = self._post_con_reintento(payload)
 
         # Versión caducada: renegocia una vigente y reintenta UNA vez.
@@ -349,6 +376,7 @@ class LinkedIn:
             "url": f"https://www.linkedin.com/feed/update/{urn}/" if urn else None,
             "caracteres": len(texto),
             "visibilidad": visibilidad,
+            "adjunto": clase_adjunto,
         }
 
     @staticmethod

@@ -278,6 +278,104 @@ def _():
     assert R.publicados_hoy() == antes + 1, "el simulacro no debe contar"
 
 
+print("\nADJUNTOS (imagen y PDF)")
+
+def _archivos_prueba():
+    import struct, zlib, pathlib
+    d = pathlib.Path(os.environ["PUBLISH_LINKEDIN_HOME"])
+    png = d / "p.png"
+    if not png.exists():
+        def ch(t, x):
+            c = t + x
+            return struct.pack(">I", len(x)) + c + struct.pack(">I", zlib.crc32(c) & 0xffffffff)
+        filas = b"".join(b"\x00" + b"\xff\x00\x00" * 4 for _ in range(4))
+        png.write_bytes(b"\x89PNG\r\n\x1a\n"
+                        + ch(b"IHDR", struct.pack(">IIBBBBB", 4, 4, 8, 2, 0, 0, 0))
+                        + ch(b"IDAT", zlib.compress(filas)) + ch(b"IEND", b""))
+    pdf = d / "p.pdf"
+    if not pdf.exists():
+        pdf.write_bytes(b"%PDF-1.4\n1 0 obj\n<< >>\nendobj\ntrailer\n<< >>\n%%EOF\n")
+    return png, pdf
+
+@prueba("clasifica una imagen y un PDF")
+def _():
+    from medios import clasificar
+    png, pdf = _archivos_prueba()
+    assert clasificar(png)[1] == "imagen"
+    assert clasificar(pdf)[1] == "documento"
+
+@prueba("rechaza una extensión que LinkedIn no acepta")
+def _():
+    from medios import clasificar, ErrorMedio
+    z = os.path.join(os.environ["PUBLISH_LINKEDIN_HOME"], "x.zip")
+    open(z, "w").write("x")
+    try:
+        clasificar(z); assert False, "debió rechazarlo"
+    except ErrorMedio as e:
+        assert ".zip" in str(e)
+
+@prueba("rechaza un archivo que no existe")
+def _():
+    from medios import clasificar, ErrorMedio
+    try:
+        clasificar("/no/existe.png"); assert False, "debió rechazarlo"
+    except ErrorMedio as e:
+        assert "No existe" in str(e)
+
+@prueba("rechaza un archivo vacío")
+def _():
+    from medios import clasificar, ErrorMedio
+    v = os.path.join(os.environ["PUBLISH_LINKEDIN_HOME"], "vacio.png")
+    open(v, "wb").close()
+    try:
+        clasificar(v); assert False, "debió rechazarlo"
+    except ErrorMedio as e:
+        assert "vacío" in str(e)
+
+@prueba("rechaza un archivo que pasa del límite")
+def _():
+    from medios import clasificar, ErrorMedio, LIMITES
+    g = os.path.join(os.environ["PUBLISH_LINKEDIN_HOME"], "grande.png")
+    with open(g, "wb") as f:
+        f.write(b"\0" * (LIMITES["imagen"] + 1))
+    try:
+        clasificar(g); assert False, "debió rechazarlo"
+    except ErrorMedio as e:
+        assert "MB" in str(e)
+
+@prueba("el adjunto entra en la huella (mismo texto + otra imagen = otro post)")
+def _():
+    png, pdf = _archivos_prueba()
+    a = R.huella("igual" + "\n@@" + str(png))
+    b = R.huella("igual" + "\n@@" + str(pdf))
+    assert a != b, "dos adjuntos distintos deben dar huellas distintas"
+
+@prueba("el adjunto se valida incluso en simulacro")
+def _():
+    from linkedin import LinkedIn, ErrorLinkedIn
+    import time as _t
+    cli = LinkedIn({"access_token": "x", "expires_at": _t.time() + 999})
+    try:
+        cli.publicar("hola", adjunto="/no/existe.png")
+        assert False, "debió rechazar la ruta mala aun en simulacro"
+    except ErrorLinkedIn:
+        pass
+
+@prueba("un post con adjunto en simulacro no toca la red")
+def _():
+    from linkedin import LinkedIn
+    import time as _t
+    png, _pdf = _archivos_prueba()
+    r = LinkedIn({"access_token": "x", "expires_at": _t.time() + 999}).publicar(
+        "hola", adjunto=str(png))
+    assert r["simulacro"] and r["adjunto"] == "imagen", r
+
+@prueba("limpiar_urn acepta el ugcPost que devuelven los PDF")
+def _():
+    from linkedin import LinkedIn
+    assert LinkedIn.limpiar_urn("urn:li:ugcPost:123") == "urn:li:ugcPost:123"
+
+
 print("\nDOCTOR")
 
 @prueba("corre los chequeos sin reventar, con o sin credenciales")

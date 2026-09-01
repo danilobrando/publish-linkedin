@@ -308,9 +308,39 @@ Verifica pidiéndole a Claude: *"¿cuál es mi estado de LinkedIn?"*
 |---|---|
 | `linkedin_estado` | ¿Hay token? ¿Hasta cuándo? ¿Qué permisos? |
 | `linkedin_quien_soy` | Confirma contra LinkedIn en qué cuenta se publicaría |
-| `linkedin_publicar` | Publica — **solo si `confirmar=True`** |
+| `linkedin_publicar` | Publica, con o sin imagen o PDF — **solo si `confirmar=True`** |
 | `linkedin_borrar` | Borra un post — **solo si `confirmar=True`** |
 | `linkedin_doctor` | Diagnostica todo. Pásale `reparar=True` para que arregle lo que pueda |
+
+### Adjuntar una imagen o un PDF
+
+```
+tú: "publica esto con la imagen ~/graficos/resultados.png"
+```
+
+Un solo adjunto por post. Sirven `.jpg` `.png` `.gif` (hasta 10 MB) y
+`.pdf` `.pptx` `.docx` (hasta 100 MB). El PDF sale en el feed como documento
+navegable, no como enlace.
+
+El parámetro `titulo` cambia de significado según el tipo, porque LinkedIn los
+usa distinto:
+
+| Adjunto | `titulo` es | Por qué importa |
+|---|---|---|
+| Imagen | el **texto alternativo** | Accesibilidad: lo lee un lector de pantalla |
+| Documento | el **nombre visible** | Es lo que la gente ve en el feed antes de abrirlo |
+
+El archivo se valida **antes** de subir nada —que exista, que la extensión
+sirva, que no esté vacío, que no pase del límite— y el ensayo te dice qué
+adjunto saldría:
+
+```
+⏸  ENSAYO — no se publicó nada.
+Con adjunto → documento: informe.pdf (2.400 KB, application/pdf)
+```
+
+Y el adjunto entra en la huella de idempotencia: el mismo texto con otra imagen
+es otro post, y bloquearlo sería un falso positivo.
 
 ### El freno de mano
 
@@ -356,7 +386,7 @@ Con esa variable, `publicar` y `borrar` **nunca tocan la red**. La suite la
 activa sola:
 
 ```bash
-.venv/bin/python prueba.py               # 37 pruebas, ninguna contacta a LinkedIn
+.venv/bin/python prueba.py               # 46 pruebas, ninguna contacta a LinkedIn
 .venv/bin/python prueba_concurrencia.py  # 8 procesos reales peleando por el lock
 ```
 
@@ -462,6 +492,7 @@ humana de LinkedIn y tardan días. **No los necesitas para publicar.**
 | Archivo | Qué es |
 |---|---|
 | `linkedin.py` | Cliente HTTP + almacén de secretos + escapado |
+| `medios.py` | Subida de imágenes y documentos (validar → subir → adjuntar) |
 | `auth.py` | Flujo OAuth (`credenciales` · `login` · `estado`) |
 | `server.py` | Servidor MCP con las cuatro herramientas |
 

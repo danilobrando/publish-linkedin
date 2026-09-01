@@ -1,5 +1,23 @@
 # Cambios
 
+## 0.2.0 — 2026-08-31
+
+### Adjuntos
+
+`linkedin_publicar` acepta `adjunto` y `titulo`: una imagen (`.jpg .png .gif`,
+10 MB) o un documento (`.pdf .pptx .docx`, 100 MB) por post. El PDF sale como
+documento navegable en el feed.
+
+La subida son dos llamadas antes de crear el post (`initializeUpload` y un PUT
+del binario). El archivo se valida antes de subir nada, y el adjunto entra en la
+huella de idempotencia — el mismo texto con otra imagen es otro post.
+
+Verificado contra la API real: subida de PNG y PDF, y un post de cada tipo,
+publicados y **borrados de inmediato**. Los PDF devuelven un URN de tipo
+`urn:li:ugcPost:` en vez de `urn:li:share:`; `limpiar_urn` ya lo contemplaba.
+
+46 pruebas.
+
 ## 0.1.0 — 2026-08-31
 
 Primera versión con hardening completo. Nació el mismo día para una clase en
