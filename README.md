@@ -2,7 +2,7 @@
 
 Servidor MCP mínimo para publicar en LinkedIn desde tu Second Brain.
 
-Cinco herramientas. ~1.100 líneas que puedes leer completas. API oficial de
+Siete herramientas. ~1.100 líneas que puedes leer completas. API oficial de
 LinkedIn (OAuth 2.0, scope `w_member_social`) — **sin cookies del navegador**,
 que es la zona gris de los términos de servicio.
 
@@ -311,6 +311,8 @@ Verifica pidiéndole a Claude: *"¿cuál es mi estado de LinkedIn?"*
 | `linkedin_publicar` | Publica, con o sin imagen o PDF — **solo si `confirmar=True`** |
 | `linkedin_borrar` | Borra un post — **solo si `confirmar=True`** |
 | `linkedin_doctor` | Diagnostica todo. Pásale `reparar=True` para que arregle lo que pueda |
+| `linkedin_menciones` | A quién puedes etiquetar por nombre |
+| `linkedin_mencion_guardar` | Agrega a alguien al directorio, verificando su URN |
 
 ### Adjuntar una imagen o un PDF
 
@@ -341,6 +343,63 @@ Con adjunto → documento: informe.pdf (2.400 KB, application/pdf)
 
 Y el adjunto entra en la huella de idempotencia: el mismo texto con otra imagen
 es otro post, y bloquearlo sería un falso positivo.
+
+### Mencionar a alguien (etiquetar)
+
+```
+tú: "publica esto agradeciéndole a @Andrés Caicedo"
+```
+
+Escribes `@Nombre` y el sistema lo convierte en una etiqueta real, que notifica
+a la persona. Funciona igual con páginas de empresa.
+
+**Pero hay un paso manual la primera vez, y no se puede evitar.**
+
+LinkedIn no le deja a esta app averiguar la URN de nadie. Probado contra la API:
+
+| Endpoint | Respuesta |
+|---|---|
+| `/v2/people?q=search` | `404` — no existe para esta app |
+| `/v2/people/(vanityName:…)` | `403` ACCESS_DENIED, partner API |
+| `/v2/connections` | `403` |
+| `/rest/organizations` | `403` |
+| `/v2/userinfo` (tú mismo) | `200` ✓ — lo único accesible |
+
+Resolver URNs ajenas exige el **Marketing Developer Platform**, que es una
+solicitud de negocio con revisión humana. No es un permiso que se active.
+
+Así que la URN se captura a mano, **una vez por persona**:
+
+1. Abre el perfil de la persona en LinkedIn, con tu sesión iniciada.
+2. Abre las herramientas de desarrollador del navegador (`⌥⌘I` en Mac) y pega
+   esto en la consola:
+   ```js
+   document.body.innerHTML.match(/urn:li:fsd_profile:([A-Za-z0-9_-]+)/)[1]
+   ```
+3. Eso devuelve algo como `ACoAAB1cD…`. La URN es `urn:li:person:` + eso.
+4. Guárdala — y el sistema **la verifica contra LinkedIn antes de aceptarla**:
+
+```
+tú: "guarda a Andrés Caicedo con urn:li:person:ACoAAB1cD..."
+→ ✓ Guardado (verificada con LinkedIn). Ahora escribe «@Andrés Caicedo».
+```
+
+La verificación usa un **borrador** que nunca sale al feed: LinkedIn valida las
+menciones del lado del servidor incluso en estado `DRAFT`, así que se crea uno,
+se lee la respuesta y se borra. Una URN inventada responde
+`400 INVALID_MENTION_PERSON_URN_ID`; una real, `201`.
+
+Es tedioso la primera vez y gratis todas las siguientes: siempre mencionas a las
+mismas veinte personas. El directorio vive en
+`~/.config/publish-linkedin/menciones.json` (permisos 0600).
+
+El ensayo te dice a quién vas a etiquetar y a quién **no**:
+
+```
+Menciona a → Andrés Caicedo (ACoAAB1cD), Tribu iA (99887)
+⚠️  Con @ pero SIN etiquetar (no están en tu directorio): Pedro Perez
+    Van a salir como texto plano.
+```
 
 ### El freno de mano
 
@@ -493,6 +552,7 @@ humana de LinkedIn y tardan días. **No los necesitas para publicar.**
 |---|---|
 | `linkedin.py` | Cliente HTTP + almacén de secretos + escapado |
 | `medios.py` | Subida de imágenes y documentos (validar → subir → adjuntar) |
+| `menciones.py` | Directorio nombre→URN, expansión de `@Nombre` y verificación |
 | `auth.py` | Flujo OAuth (`credenciales` · `login` · `estado`) |
 | `server.py` | Servidor MCP con las cuatro herramientas |
 

@@ -91,7 +91,18 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
             (.pdf .pptx .docx). Un solo adjunto por post.
         titulo: para imágenes es el texto alternativo (accesibilidad);
             para documentos es el nombre que LinkedIn muestra en el feed.
+
+    Para mencionar a alguien escribe `@Nombre Apellido` tal como está guardado
+    en el directorio (linkedin_menciones), o la anotación completa
+    `@[Nombre](urn:li:person:XXX)`. Lo que no se pueda resolver sale como texto
+    plano y el ensayo te avisa cuáles.
     """
+    from menciones import ErrorMencion, encontradas, expandir
+    try:
+        texto, mencionados, sin_resolver = expandir(texto)
+    except ErrorMencion as e:
+        return f"✗ {e}"
+
     linea_adjunto = ""
     if adjunto:
         from medios import ErrorMedio, descripcion
@@ -119,6 +130,15 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
                      f"    Si confirmas, me voy a negar. Cambia el texto, o borra el "
                      f"anterior con linkedin_borrar.\n")
         adj = f"Con adjunto → {linea_adjunto}\n" if linea_adjunto else ""
+        etiquetas = encontradas(texto)
+        if etiquetas:
+            adj += ("Menciona a → " +
+                    ", ".join(f"{n} ({u.split(':')[-1]})" for n, u in etiquetas) + "\n")
+        if sin_resolver:
+            adj += ("⚠️  Con @ pero SIN etiquetar (no están en tu directorio): " +
+                    ", ".join(sin_resolver) + "\n"
+                    "    Van a salir como texto plano. Agrégalos con "
+                    "linkedin_mencion_guardar si quieres que se etiqueten.\n")
         return (f"⏸  ENSAYO — no se publicó nada.\n{aviso}\n"
                 f"{adj}"
                 f"Se enviaría a LinkedIn ({visibilidad}, {len(texto)}/3000 caracteres):\n"
@@ -165,7 +185,9 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
                         f"quieres publicar más.")
 
             R.registrar("INTENTO", huella=h, chars=len(texto), visibilidad=visibilidad,
-                        adjunto=linea_adjunto or None, extracto=texto[:120])
+                        adjunto=linea_adjunto or None,
+                        menciona=[n for n, _ in encontradas(texto)] or None,
+                        extracto=texto[:120])
             r = LinkedIn.desde_keychain().publicar(texto, visibilidad, adjunto, titulo)
     except R.BloqueadoError as e:
         R.registrar("BLOQUEADO", huella=h, motivo=str(e))
@@ -277,6 +299,63 @@ def linkedin_doctor(reparar: bool = False) -> str:
                D.MAL: "Hay algo roto — mira las flechas."}[v]
     cabeza = ("\n".join(reparaciones) + "\n\n") if reparaciones else ""
     return cabeza + "\n".join(lineas) + f"\n\n{resumen}"
+
+
+@mcp.tool()
+def linkedin_menciones() -> str:
+    """Lista a quién puedes mencionar por nombre (el directorio local).
+
+    LinkedIn no deja averiguar la URN de otra persona con esta app, así que el
+    directorio se llena a mano, una vez por persona.
+    """
+    from menciones import DIRECTORIO, ErrorMencion, cargar
+    try:
+        d = cargar()
+    except ErrorMencion as e:
+        return f"✗ {e}"
+    if not d:
+        return ("El directorio está vacío.\n"
+                f"  Vive en: {DIRECTORIO}\n"
+                "  Agrega a alguien con linkedin_mencion_guardar.\n"
+                "  Para conseguir su URN, mira las instrucciones en el README "
+                "(sección «Mencionar a alguien»): es un paso manual porque "
+                "LinkedIn no expone esa búsqueda a esta app.")
+    filas = "\n".join(f"  {n:32} {u}" for n, u in sorted(d.items()))
+    return f"Puedes mencionar por nombre a {len(d)} :\n{filas}\n\n  ({DIRECTORIO})"
+
+
+@mcp.tool()
+def linkedin_mencion_guardar(nombre: str, urn: str,
+                             verificar_con_linkedin: bool = True) -> str:
+    """Guarda a alguien en el directorio de menciones, para etiquetarlo por nombre.
+
+    Antes de guardar, comprueba contra LinkedIn que la URN corresponda a alguien
+    real — usando un borrador que nunca sale al feed. Si no, guardarías una URN
+    mala y te enterarías cuando un post fallara.
+
+    Args:
+        nombre: cómo lo vas a escribir en los posts, después del @.
+        urn: su `urn:li:person:XXX` o `urn:li:organization:XXX`.
+        verificar_con_linkedin: False para guardar sin comprobar (offline).
+    """
+    from menciones import ErrorMencion, guardar, verificar
+    if verificar_con_linkedin:
+        ok, motivo = verificar(urn)
+        if not ok:
+            R.registrar("MENCION_RECHAZADA", nombre=nombre, urn=urn, motivo=motivo)
+            return (f"✗ No la guardé: {motivo}.\n"
+                    f"  {urn}\n"
+                    f"  Revisa que sea la URN correcta. Si estás sin conexión, "
+                    f"puedes forzarlo con verificar_con_linkedin=False.")
+    try:
+        guardar(nombre, urn)
+    except ErrorMencion as e:
+        return f"✗ {e}"
+    R.registrar("MENCION_GUARDADA", nombre=nombre, urn=urn,
+                verificada=verificar_con_linkedin)
+    sello = " (verificada con LinkedIn)" if verificar_con_linkedin else " (sin verificar)"
+    return (f"✓ Guardado{sello}. Ahora escribe «@{nombre}» en un post y se "
+            f"etiqueta solo.\n  {urn}")
 
 
 if __name__ == "__main__":

@@ -376,6 +376,77 @@ def _():
     assert LinkedIn.limpiar_urn("urn:li:ugcPost:123") == "urn:li:ugcPost:123"
 
 
+print("\nMENCIONES")
+
+@prueba("escapar NO destroza una anotación de mención")
+def _():
+    from linkedin import escapar
+    t = "Gracias a @[Andrés Caicedo](urn:li:person:ABC123) por la idea."
+    assert escapar(t) == t, escapar(t)
+
+@prueba("pero sí escapa el texto de alrededor")
+def _():
+    from linkedin import escapar
+    r = escapar("Mira (esto) y @[X](urn:li:organization:9) *ojo*")
+    assert "\\(esto\\)" in r and "\\*ojo\\*" in r
+    assert "@[X](urn:li:organization:9)" in r
+
+@prueba("un @ suelto sí se escapa (no es mención)")
+def _():
+    from linkedin import escapar
+    assert "\\@" in escapar("correo@dominio.com")
+
+@prueba("rechaza una URN con forma inválida")
+def _():
+    from menciones import guardar, ErrorMencion
+    try:
+        guardar("X", "no-soy-urn"); assert False, "debió rechazarla"
+    except ErrorMencion:
+        pass
+
+@prueba("expande @Nombre desde el directorio")
+def _():
+    from menciones import guardar, expandir
+    guardar("Andrés Caicedo", "urn:li:person:ABC123")
+    t, m, faltan = expandir("Gracias a @Andrés Caicedo por todo")
+    assert "@[Andrés Caicedo](urn:li:person:ABC123)" in t, t
+    assert m == ["Andrés Caicedo"] and not faltan
+
+@prueba("avisa de los @ que no puede resolver")
+def _():
+    from menciones import expandir
+    _t, _m, faltan = expandir("Hola @Persona Inexistente")
+    assert faltan, "debía avisar del no resuelto"
+
+@prueba("prefiere el nombre más largo (Andrés Caicedo sobre Andrés)")
+def _():
+    from menciones import guardar, expandir
+    guardar("Andrés", "urn:li:person:CORTO")
+    t, _m, _f = expandir("@Andrés Caicedo escribió")
+    assert "urn:li:person:ABC123" in t, t
+    assert "urn:li:person:CORTO" not in t
+
+@prueba("respeta una anotación ya completa")
+def _():
+    from menciones import expandir
+    orig = "ya está @[Otro](urn:li:person:ZZZ) listo"
+    t, _m, _f = expandir(orig)
+    assert t == orig, t
+
+@prueba("acepta organizaciones además de personas")
+def _():
+    from menciones import guardar, expandir
+    guardar("Tribu iA", "urn:li:organization:99887")
+    t, _m, _f = expandir("con @Tribu iA")
+    assert "urn:li:organization:99887" in t
+
+@prueba("partir separa anotaciones de texto normal")
+def _():
+    from menciones import partir
+    tr = partir("a @[N](urn:li:person:X) b")
+    assert [e for e, _ in tr] == [False, True, False], tr
+
+
 print("\nDOCTOR")
 
 @prueba("corre los chequeos sin reventar, con o sin credenciales")

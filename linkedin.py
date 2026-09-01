@@ -179,12 +179,25 @@ def guardar_token(token: dict) -> None:
     kc_guardar(KC_TOKEN, json.dumps(token))
 
 
-def escapar(texto: str) -> str:
-    """Escapa los reservados. Deja pasar los hashtags (#palabra) intactos."""
+def _escapar_tramo(texto: str) -> str:
     for c in RESERVADOS:
         texto = texto.replace(c, "\\" + c)
     # '#' solo se escapa cuando NO abre un hashtag real
     return re.sub(r"#(?![\w])", r"\\#", texto)
+
+
+def escapar(texto: str) -> str:
+    """Escapa los reservados, **sin destrozar las menciones**.
+
+    Una mención se escribe `@[Nombre](urn:li:person:X)` y usa cuatro caracteres
+    que también son reservados: `@ [ ] ( )`. Escaparlos a ciegas convierte la
+    etiqueta en texto literal — el post sale con los corchetes a la vista y sin
+    notificar a nadie. Por eso el texto se parte en tramos y solo se escapa lo
+    que NO es una anotación.
+    """
+    from menciones import partir
+    return "".join(t if es_anotacion else _escapar_tramo(t)
+                   for es_anotacion, t in partir(texto))
 
 
 # --------------------------------------------------------------------------

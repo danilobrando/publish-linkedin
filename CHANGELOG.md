@@ -1,5 +1,34 @@
 # Cambios
 
+## 0.3.0 — 2026-08-31
+
+### Mencionar personas y organizaciones
+
+Escribes `@Nombre` y sale una etiqueta real, que notifica. También páginas de
+empresa. Dos herramientas nuevas: `linkedin_menciones` y
+`linkedin_mencion_guardar`.
+
+**El límite honesto:** LinkedIn no le deja a esta app averiguar la URN de nadie.
+Verificado — `/v2/people?q=search` da 404, `vanityName`, `connections` y
+`organizations` dan 403 «partner API», y solo `/v2/userinfo` responde 200.
+Resolverlas exige el Marketing Developer Platform, que es una solicitud de
+negocio con revisión humana. Así que la URN se captura a mano una vez por
+persona; el README trae el procedimiento.
+
+**Verificación sin ensuciar el feed:** LinkedIn valida las menciones del lado
+del servidor incluso con `lifecycleState: DRAFT`. `linkedin_mencion_guardar`
+crea un borrador con la mención, lee la respuesta y lo borra. Una URN inventada
+da `400 INVALID_MENTION_PERSON_URN_ID`; una real, `201`. Ese mismo experimento
+es lo que prueba que la mención se resuelve contra una persona real y no se
+manda como texto literal.
+
+**El bug que había que evitar:** `@ [ ] ( )` son reservados del formato little
+text. Escaparlos a ciegas convertía la etiqueta en texto plano — corchetes a la
+vista y sin notificar a nadie. Ahora el texto se parte en tramos y solo se
+escapa lo que no es anotación.
+
+56 pruebas.
+
 ## 0.2.0 — 2026-08-31
 
 ### Adjuntos

@@ -70,6 +70,19 @@ Nunca pidas ni aceptes el Client Secret por el chat.
 - Si el usuario menciona un archivo, **pregúntale la ruta**: no la adivines ni
   uses la primera coincidencia de un `ls`.
 
+## Mencionar a alguien
+
+El usuario escribe `@Nombre` y se expande solo, **si esa persona ya está en el
+directorio**. Revisa con `linkedin_menciones`.
+
+Si pide etiquetar a alguien que no está: **no inventes la URN**. LinkedIn no
+deja buscarla con esta app (403 en todo lo que no sea el propio perfil).
+Explícale el paso manual del README —consola del navegador en el perfil de la
+persona— y guárdala con `linkedin_mencion_guardar`, que la verifica sola.
+
+El ensayo lista a quién se etiqueta y a quién no. Enséñaselo antes de confirmar:
+un `@Nombre` sin resolver sale como texto plano y no notifica a nadie.
+
 ## Publicar
 
 `linkedin_publicar` **no publica** sin `confirmar=True`. Siempre:
