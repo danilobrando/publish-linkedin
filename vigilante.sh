@@ -10,6 +10,7 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PY="$REPO/.venv/bin/python"
+export LANG="${LANG:-en_US.UTF-8}"   # launchd arranca sin locale
 LOG="${PUBLISH_LINKEDIN_HOME:-$HOME/.config/publish-linkedin}/vigilante.log"
 mkdir -p "$(dirname "$LOG")"
 
@@ -29,7 +30,10 @@ codigo=$?
 echo "$marca	tras-fix	$salida" >> "$LOG"
 [ "$codigo" -eq 0 ] && exit 0
 
-detalle="$("$PY" "$REPO/doctor.py" 2>&1 | grep -E '^\s+[!✗]' | head -3)"
+# Se filtra por el ESTADO, no por el icono: bajo launchd el locale puede no ser
+# UTF-8 y un grep por '✗' matchea cualquier byte del multibyte — incluido el ✓.
+detalle="$("$PY" "$REPO/doctor.py" 2>&1 | grep -vF '✓' | grep -E '^[[:space:]]+[^[:space:]]' | head -3)"
+[ -z "$detalle" ] && detalle="El doctor reporta problemas. Corre: $REPO/doctor.py"
 osascript -e "display notification \"$(echo "$detalle" | head -1 | tr -d '"')\" with title \"publish-linkedin necesita atención\"" 2>/dev/null || true
 echo "$marca	AVISADO	$detalle" >> "$LOG"
 exit "$codigo"

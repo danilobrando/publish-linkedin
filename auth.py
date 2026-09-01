@@ -151,30 +151,39 @@ def login() -> None:
     print(f"✓ Autenticado como {yo['nombre']} ({yo['urn']})")
 
 
-def estado() -> None:
+def estado() -> int:
+    cid = kc_leer(KC_CLIENT_ID)
+    if not cid or not kc_leer(KC_CLIENT_SECRET):
+        print("✗ Todavía no hay credenciales de la app. "
+              "Corre: python auth.py credenciales", file=sys.stderr)
+        return 2
+    print(f"✓ Credenciales de la app guardadas (client_id …{cid[-4:]})")
     tok = cargar_token()
     if not tok:
-        print("✗ Sin token. Corre: python auth.py login")
-        return
+        print("✗ Falta autenticarte. Corre: python auth.py login", file=sys.stderr)
+        return 2
     quedan = tok["expires_at"] - time.time()
     venc = time.strftime("%Y-%m-%d %H:%M", time.localtime(tok["expires_at"]))
     if quedan <= 0:
-        print(f"✗ Token VENCIDO el {venc}. Corre: python auth.py login")
-        return
+        print(f"✗ Token VENCIDO el {venc}. Corre: python auth.py login", file=sys.stderr)
+        return 2
     print(f"✓ Token vigente hasta {venc} ({int(quedan / 86400)} días)")
     print(f"  Scopes: {', '.join(tok.get('scopes', []))}")
     try:
         yo = LinkedIn.desde_keychain().quien_soy()
         print(f"✓ LinkedIn responde: {yo['nombre']} ({yo['urn']})")
     except ErrorLinkedIn as e:
-        print(f"✗ El token existe pero LinkedIn lo rechaza: {e}")
+        print(f"✗ El token existe pero LinkedIn lo rechaza: {e}", file=sys.stderr)
+        return 2
+    return 0
 
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "estado"
-    {"credenciales": credenciales, "importar": importar_desde_mcp_json,
-     "login": login, "estado": estado}.get(
-        cmd,
-        lambda: print(f"Comando desconocido: {cmd}\n"
-                      "Usa: credenciales | login | estado | importar <ruta>")
-    )()
+    comandos = {"credenciales": credenciales, "importar": importar_desde_mcp_json,
+                "login": login, "estado": estado}
+    if cmd not in comandos:
+        print(f"Comando desconocido: {cmd}\n"
+              "Usa: credenciales | login | estado | importar <ruta>", file=sys.stderr)
+        sys.exit(64)   # EX_USAGE
+    sys.exit(comandos[cmd]() or 0)

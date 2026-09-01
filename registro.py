@@ -29,6 +29,10 @@ EVENTOS = Path(os.environ.get("PUBLISH_LINKEDIN_JSONL", HOME / "eventos.jsonl"))
 LOCK = HOME / "publicando.lock"
 
 VENTANA_IDEMPOTENCIA = int(os.environ.get("PUBLISH_LINKEDIN_VENTANA_H", "24")) * 3600
+# Techo diario. La idempotencia impide repetir el MISMO texto; esto impide que
+# un agente en bucle publique 200 posts distintos. Es un límite de daño, no de
+# producto: nadie publica 10 veces al día a mano.
+LIMITE_DIARIO = int(os.environ.get("PUBLISH_LINKEDIN_LIMITE_DIARIO", "10"))
 LOCK_RANCIO = 2 * 3600  # 2h: si un lock lleva más tiempo, el proceso murió
 
 
@@ -136,6 +140,13 @@ def ya_publicado(texto: str) -> dict | None:
         if d.get("evento") == "PUBLICADO":
             return d
     return None
+
+
+def publicados_hoy() -> int:
+    """Cuántos posts reales salieron en las últimas 24 horas."""
+    corte = int(time.time()) - 86400
+    return sum(1 for d in leer_eventos(corte)
+               if d.get("evento") == "PUBLICADO" and not d.get("simulacro"))
 
 
 def olvidar(urn: str) -> None:

@@ -19,7 +19,14 @@ import os
 import time
 from pathlib import Path
 
-from mcp.server.mcpserver import MCPServer
+try:
+    from mcp.server.mcpserver import MCPServer
+except ImportError as _e:  # mcp 1.x tenía esta clase con otro nombre
+    raise SystemExit(
+        "Necesitas mcp 2.0 o más nuevo (tienes una versión vieja donde esta "
+        "clase se llamaba FastMCP).\n"
+        "  .venv/bin/pip install -U 'mcp[cli]>=2.0'"
+    ) from _e
 
 import registro as R
 from linkedin import (ErrorLinkedIn, LinkedIn, cargar_token,
@@ -88,6 +95,7 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
 
     if not confirmar:
         previo = R.ya_publicado(texto)
+        _esc = escapar(texto)
         R.registrar("ENSAYO", chars=len(texto), visibilidad=visibilidad,
                     huella=R.huella(texto))
         aviso = ""
@@ -100,7 +108,7 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
                 f"Se enviaría a LinkedIn ({visibilidad}, {len(texto)}/3000 caracteres):\n"
                 f"{'─' * 60}\n{texto}\n{'─' * 60}\n"
                 f"Tal como lo recibe la API (con reservados escapados):\n"
-                f"{escapar(texto)[:300]}{'…' if len(texto) > 300 else ''}\n\n"
+                f"{_esc[:300]}{'…' if len(_esc) > 300 else ''}\n\n"
                 f"Para publicarlo de verdad, vuelve a llamarme con confirmar=True.")
 
     # Sin diario no hay protección contra duplicados. Publicar a ciegas es peor
@@ -129,6 +137,15 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
             # post y se cae al responder, queda constancia de que SE INTENTÓ.
             # Sin esto, un timeout deja el post vivo y sin rastro, y el próximo
             # intento lo duplica.
+            hoy = R.publicados_hoy()
+            if hoy >= R.LIMITE_DIARIO:
+                R.registrar("LIMITE_DIARIO", publicados=hoy)
+                return (f"✗ No publico: ya salieron {hoy} posts en las últimas 24 "
+                        f"horas y el techo es {R.LIMITE_DIARIO}.\n"
+                        f"  Es un límite de daño, por si algo se quedó en bucle. "
+                        f"Súbelo con PUBLISH_LINKEDIN_LIMITE_DIARIO si de verdad "
+                        f"quieres publicar más.")
+
             R.registrar("INTENTO", huella=h, chars=len(texto), visibilidad=visibilidad,
                         extracto=texto[:120])
             r = LinkedIn.desde_keychain().publicar(texto, visibilidad)
@@ -204,16 +221,31 @@ def linkedin_doctor(reparar: bool = False) -> str:
         reparar: True intenta arreglar solo lo que se pueda (locks rancios, permisos).
     """
     import doctor as D
+    reparaciones = []
     if reparar:
-        hechos, pendientes = [], []
         if D.R.LOCK.exists():
             edad = time.time() - D.R.LOCK.stat().st_mtime
             if edad > D.R.LOCK_RANCIO:
                 try:
                     D.R.LOCK.unlink()
-                    hechos.append(f"Quité un lock rancio de {int(edad / 3600)}h")
+                    D.R.registrar("FIX", accion="lock_rancio_eliminado", edad_s=int(edad))
+                    reparaciones.append(f"✓ Quité un lock rancio de {int(edad / 3600)}h")
                 except OSError as e:
-                    pendientes.append(f"No pude quitar el lock: {e}")
+                    reparaciones.append(f"✗ No pude quitar el lock: {e}")
+            else:
+                reparaciones.append(f"· Hay una publicación en curso ({int(edad)}s). Espera.")
+        try:
+            import os as _os
+            D.R._asegurar_home()
+            if _os.name != "nt":
+                modo = D.R.HOME.stat().st_mode & 0o777
+                if modo != 0o700:
+                    _os.chmod(D.R.HOME, 0o700)
+                    reparaciones.append(f"✓ Corregí permisos de {D.R.HOME}")
+        except OSError as e:
+            reparaciones.append(f"✗ No pude ajustar permisos: {e}")
+        if not reparaciones:
+            reparaciones.append("· No había nada que reparar automáticamente")
     cs = D.correr_chequeos()
     ancho = max(len(c["nombre"]) for c in cs)
     lineas = [f"{D.ICONO[c['estado']]} {c['nombre'].ljust(ancho)}  {c['detalle']}"
@@ -224,7 +256,8 @@ def linkedin_doctor(reparar: bool = False) -> str:
     resumen = {D.OK: "Todo en orden.",
                D.AVISO: "Funciona, pero hay algo que atender.",
                D.MAL: "Hay algo roto — mira las flechas."}[v]
-    return "\n".join(lineas) + f"\n\n{resumen}"
+    cabeza = ("\n".join(reparaciones) + "\n\n") if reparaciones else ""
+    return cabeza + "\n".join(lineas) + f"\n\n{resumen}"
 
 
 if __name__ == "__main__":

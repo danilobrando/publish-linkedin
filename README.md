@@ -2,7 +2,7 @@
 
 Servidor MCP mínimo para publicar en LinkedIn desde tu Second Brain.
 
-Cuatro herramientas. ~490 líneas que puedes leer completas. API oficial de
+Cinco herramientas. ~1.100 líneas que puedes leer completas. API oficial de
 LinkedIn (OAuth 2.0, scope `w_member_social`) — **sin cookies del navegador**,
 que es la zona gris de los términos de servicio.
 
@@ -134,7 +134,10 @@ Client ID y Client Secret, y explícale por qué no es riesgoso:
 Adviértele también que **es prestado**: si el instructor rota el secreto, tiene que volver
 a hacer el paso 2 con credenciales propias. Por eso el camino bueno es el de arriba.
 
-Dile que corra **en su terminal**, dentro de la carpeta del repo:
+### 2c · Guardar las credenciales — los DOS caminos pasan por aquí
+
+Cuando el usuario ya tenga Client ID y Client Secret —propias o prestadas—, dile que corra
+**en su terminal**, dentro de la carpeta del repo:
 
 ```bash
 .venv/bin/python auth.py credenciales
@@ -146,8 +149,13 @@ Le va a pedir **Client ID** (se ve al escribir) y **Client Secret** (no se ve, e
 ```bash
 .venv/bin/python auth.py estado
 ```
-Debe decir que hay credenciales pero que falta el token. Si dice
-`Todavía no hay credenciales`, el paso 2 no se completó — no sigas.
+
+| Lo que imprime | Qué significa |
+|---|---|
+| `✗ Todavía no hay credenciales` | El paso 2c no se completó. **No sigas.** |
+| `✓ Credenciales de la app guardadas` + `✗ Falta autenticarte` | Correcto. Sigue al paso 3. |
+
+El código de salida también sirve: `2` si falta algo, `0` si todo está listo.
 
 ## Paso 3 — Autorizar *(lo hace el usuario)*
 
@@ -301,7 +309,8 @@ Verifica pidiéndole a Claude: *"¿cuál es mi estado de LinkedIn?"*
 | `linkedin_estado` | ¿Hay token? ¿Hasta cuándo? ¿Qué permisos? |
 | `linkedin_quien_soy` | Confirma contra LinkedIn en qué cuenta se publicaría |
 | `linkedin_publicar` | Publica — **solo si `confirmar=True`** |
-| `linkedin_borrar` | Borra un post publicado. El botón de deshacer. |
+| `linkedin_borrar` | Borra un post — **solo si `confirmar=True`** |
+| `linkedin_doctor` | Diagnostica todo. Pásale `reparar=True` para que arregle lo que pueda |
 
 ### El freno de mano
 
@@ -311,6 +320,65 @@ queda tras escapar los reservados del formato *little text* de LinkedIn.
 
 Publicar es irreversible y es tu nombre. Un sistema autónomo sin freno no es
 autonomía — es un accidente esperando su turno.
+
+## Cuando algo no funcione: el doctor
+
+```bash
+.venv/bin/python doctor.py          # 10 chequeos, cada fallo dice qué hacer
+.venv/bin/python doctor.py fix      # repara locks rancios y permisos
+.venv/bin/python doctor.py --quiet  # solo el veredicto (para scripts)
+```
+
+Códigos de salida: `0` todo bien · `1` hay un aviso · `2` algo roto · `64` mal uso.
+
+También está como herramienta MCP: pídele a Claude *"diagnostica mi LinkedIn"*.
+
+### Que te avise antes de que se venza el token
+
+El token dura ~60 días y **LinkedIn no avisa**. Esta app no recibe
+`refresh_token` (solo se los dan a apps aprobadas), así que hay que volver a
+autorizar. Para no enterarte el día que necesitas publicar:
+
+```bash
+./instalar-vigilante.sh        # corre el doctor a diario a las 9:15 (macOS)
+./instalar-vigilante.sh quitar
+```
+
+En Linux, la misma idea con cron: `15 9 * * * /ruta/al/repo/vigilante.sh`
+
+## Probar sin publicar
+
+```bash
+PUBLISH_LINKEDIN_SIMULACRO=1 ...
+```
+
+Con esa variable, `publicar` y `borrar` **nunca tocan la red**. La suite la
+activa sola:
+
+```bash
+.venv/bin/python prueba.py     # 36 pruebas, ninguna contacta a LinkedIn
+```
+
+> Existe por un incidente real: el 31-ago-2026, dos corridas automatizadas
+> publicaron de verdad en un perfil real. Redirigir el directorio de datos no
+> basta — el token vive en el Keychain y sigue siendo válido.
+
+## Cómo se evita publicar dos veces
+
+Es el fallo más caro de un publicador: no fallar, sino **duplicar en público**.
+Hay cuatro controles, y los cuatro fueron necesarios:
+
+| Control | Qué previene |
+|---|---|
+| Huella del contenido, ventana 24h | Republicar el mismo texto |
+| El chequeo corre **dentro** del lock | Que dos procesos lo pasen a la vez |
+| Lock atómico (`O_CREAT\|O_EXCL`) | Que dos procesos tomen el lock a la vez |
+| Se registra `INTENTO` **antes** de llamar | Que un timeout deje el post vivo sin rastro |
+
+Y ante un `5xx` de LinkedIn **no se reintenta a propósito**: un 5xx no dice si
+el post se creó o no. El mensaje te lo dice y te manda a revisar tu perfil.
+
+Si borras un post, su huella se libera y puedes volver a publicarlo corregido.
 
 ## Seguridad
 
@@ -392,9 +460,16 @@ humana de LinkedIn y tardan días. **No los necesitas para publicar.**
 | `auth.py` | Flujo OAuth (`credenciales` · `login` · `estado`) |
 | `server.py` | Servidor MCP con las cuatro herramientas |
 
-## Pendiente
+## Estado y pendientes
 
-Ver `HARDENING.md`. Lo más importante que falta: idempotencia (evitar publicar
-dos veces el mismo texto) y aviso antes de que venza el token.
+Versión `0.1.0`. Ver `HARDENING.md` para el detalle.
+
+Lo que falta y conviene saber antes de confiar en esto:
+
+- **Windows y Linux están escritos pero sin probar.** El código los contempla;
+  nadie los ha corrido de verdad.
+- **No hay `refresh_token`**: reautorizar cada ~60 días es obligatorio.
+- Publicar sin humano **no está soportado a propósito**. `confirmar=True` es
+  siempre de una persona.
 
 MIT.

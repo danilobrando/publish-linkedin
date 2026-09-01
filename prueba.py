@@ -270,14 +270,38 @@ def _():
                                             else server.linkedin_borrar).parameters
 
 
+@prueba("el techo diario cuenta solo publicaciones reales")
+def _():
+    antes = R.publicados_hoy()
+    R.registrar("PUBLICADO", huella=R.huella("t1"), urn="u1")
+    R.registrar("PUBLICADO", huella=R.huella("t2"), urn="u2", simulacro=True)
+    assert R.publicados_hoy() == antes + 1, "el simulacro no debe contar"
+
+
 print("\nDOCTOR")
 
-@prueba("corre los chequeos sin reventar")
+@prueba("corre los chequeos sin reventar, con o sin credenciales")
 def _():
     import doctor as D
     cs = D.correr_chequeos()
-    assert len(cs) >= 5, f"esperaba varios chequeos, hubo {len(cs)}"
+    # En un clon fresco no hay credenciales y los chequeos paran temprano: eso
+    # es correcto, no un fallo. Lo que se prueba es que NUNCA revienta y que
+    # siempre emite un veredicto.
+    assert len(cs) >= 2, f"esperaba al menos dependencias y almacén, hubo {len(cs)}"
     assert D.veredicto(cs) in (D.OK, D.AVISO, D.MAL)
+    assert all({"nombre", "estado", "detalle"} <= set(c) for c in cs)
+
+@prueba("cada chequeo en MAL dice qué hacer")
+def _():
+    import doctor as D
+    for c in D.correr_chequeos():
+        if c["estado"] == D.MAL:
+            assert c["arreglo"], f"'{c['nombre']}' falla sin decir cómo arreglarlo"
+
+@prueba("version() responde algo")
+def _():
+    import doctor as D
+    assert D.version() and D.version() != ""
 
 
 print()

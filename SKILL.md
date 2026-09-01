@@ -14,7 +14,17 @@ description: >
 Servidor MCP con cinco herramientas: `linkedin_estado`, `linkedin_quien_soy`,
 `linkedin_publicar`, `linkedin_borrar`, `linkedin_doctor`.
 
-Repo: `~/dev/publish-linkedin` · público en `github.com/danilobrando/publish-linkedin`
+Repo público: `github.com/danilobrando/publish-linkedin`
+
+**Antes de correr cualquier comando, averigua dónde está instalado** — cada
+persona lo clonó en otro lado. Pregúntale al usuario, o búscalo:
+
+```bash
+claude mcp get publish-linkedin    # la ruta sale en Command/Args
+```
+
+En lo que sigue, `$REPO` es esa carpeta y `$PY` es `$REPO/.venv/bin/python`
+(en Windows, `$REPO\.venv\Scripts\python`).
 
 ## AUTO-RECOVERY POLICY
 
@@ -22,13 +32,13 @@ Cuando el usuario reporte cualquier problema con LinkedIn, **antes de responderl
 
 1. Corre el diagnóstico en silencio:
    ```bash
-   ~/dev/publish-linkedin/.venv/bin/python ~/dev/publish-linkedin/doctor.py --quiet
+   "$PY" "$REPO/doctor.py" --quiet
    ```
 2. Si dice `ok` → el conector está sano. El problema es otro: pregunta qué pasó
    exactamente y desde cuándo. **No mandes al usuario a reinstalar nada.**
 3. Si dice `aviso` o `mal` → intenta la reparación automática:
    ```bash
-   ~/dev/publish-linkedin/.venv/bin/python ~/dev/publish-linkedin/doctor.py fix --quiet
+   "$PY" "$REPO/doctor.py" fix --quiet
    ```
 4. Vuelve a correr el doctor. Si quedó en `ok`, dile al usuario qué estaba roto y
    que ya está resuelto — en una frase, sin jerga.
@@ -86,4 +96,4 @@ estés probando. La suite (`prueba.py`) la activa sola.
 | Diario legible | `~/.config/publish-linkedin/publicaciones.log` |
 | Diario consultable | `~/.config/publish-linkedin/eventos.jsonl` |
 | Lock | `~/.config/publish-linkedin/publicando.lock` |
-| Secretos | Keychain de macOS (`PUBLISH_LINKEDIN_*`) |
+| Secretos | Keychain de macOS (`PUBLISH_LINKEDIN_*`) · archivo 0600 fuera de macOS |

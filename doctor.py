@@ -45,12 +45,22 @@ def correr_chequeos() -> list[dict]:
 
     # 1 · Dependencias
     try:
-        import mcp, requests  # noqa: F401
-        out.append(_chequeo("Dependencias", OK, "mcp y requests instalados"))
+        import requests  # noqa: F401
+        import importlib.metadata as _md
+        vmcp = _md.version("mcp")
+        mayor = int(vmcp.split(".")[0])
+        if mayor < 2:
+            out.append(_chequeo("Dependencias", MAL,
+                                f"mcp {vmcp}: el servidor necesita 2.0 o más nuevo",
+                                ".venv/bin/pip install -U 'mcp[cli]>=2.0'"))
+            return out
+        out.append(_chequeo("Dependencias", OK, f"mcp {vmcp} · requests OK"))
     except ImportError as e:
         out.append(_chequeo("Dependencias", MAL, f"falta {e.name}",
                             ".venv/bin/pip install -r requirements.txt"))
         return out  # sin esto no se puede seguir
+    except Exception as e:
+        out.append(_chequeo("Dependencias", AVISO, f"no pude verificar mcp: {e}"))
 
     from linkedin import (KC_CLIENT_ID, KC_CLIENT_SECRET, REDIRECT_URI, SCOPES,
                           ErrorLinkedIn, LinkedIn, cargar_token,

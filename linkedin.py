@@ -28,7 +28,9 @@ API = "https://api.linkedin.com"
 # Por eso `_renegociar_version()` la recalcula sola en vez de morir en silencio.
 API_VERSION = "202608"
 REDIRECT_URI = "http://localhost:8765/callback"
-SCOPES = ["openid", "profile", "email", "w_member_social"]
+# Se pide el mínimo. `email` se quitó: nunca se usó, y pedir un permiso que no
+# necesitas es lo que hace que la gente le desconfíe a una app.
+SCOPES = ["openid", "profile", "w_member_social"]
 
 # Los secretos viven en el Keychain de macOS, nunca en un archivo de texto.
 KC_CLIENT_ID = "PUBLISH_LINKEDIN_CLIENT_ID"
@@ -225,7 +227,11 @@ class LinkedIn:
                 headers={"Authorization": f"Bearer {self.token['access_token']}",
                          "X-Restli-Protocol-Version": "2.0.0", "LinkedIn-Version": v},
             )
-            if "NONEXISTENT_VERSION" not in r.text:
+            # Solo se acepta una versión que LinkedIn respondió BIEN. Antes
+            # bastaba con que la respuesta no trajera el string, así que un 401
+            # o un error de red promovía una versión cualquiera y enmascaraba
+            # el problema real.
+            if r.status_code == 200:
                 API_VERSION = v
                 return True
         return False
@@ -271,6 +277,12 @@ class LinkedIn:
             self._urn = "urn:li:person:SIMULACRO"
             return {"nombre": "Perfil de simulacro", "urn": self._urn}
         r = requests.get(f"{API}/v2/userinfo", headers=self._headers(), timeout=20)
+        # Si la versión de API caducó, esto falla igual que publicar. Sin esta
+        # renegociación, el doctor y `auth.py estado` reportarían "roto" con un
+        # mensaje que no dice que basta con cambiar un número.
+        if r.status_code == 426 and "NONEXISTENT_VERSION" in r.text:
+            if self._renegociar_version():
+                r = requests.get(f"{API}/v2/userinfo", headers=self._headers(), timeout=20)
         if r.status_code != 200:
             raise ErrorLinkedIn(traducir_error(r.status_code, r.text))
         d = r.json()
