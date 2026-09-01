@@ -356,8 +356,13 @@ Con esa variable, `publicar` y `borrar` **nunca tocan la red**. La suite la
 activa sola:
 
 ```bash
-.venv/bin/python prueba.py     # 36 pruebas, ninguna contacta a LinkedIn
+.venv/bin/python prueba.py               # 37 pruebas, ninguna contacta a LinkedIn
+.venv/bin/python prueba_concurrencia.py  # 8 procesos reales peleando por el lock
 ```
+
+La segunda va aparte porque necesita procesos de verdad. Verifica que el lock
+sea atómico — y está calibrada para **fallar** con la versión anterior, que
+dejaba entrar hasta 8 publicadores a la vez.
 
 > Existe por un incidente real: el 31-ago-2026, dos corridas automatizadas
 > publicaron de verdad en un perfil real. Redirigir el directorio de datos no
