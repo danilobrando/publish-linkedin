@@ -55,6 +55,55 @@ class ErrorLinkedIn(Exception):
 
 
 # --------------------------------------------------------------------------
+# Catálogo de errores
+#
+# LinkedIn responde con códigos y cuerpos que no dicen qué hacer. Cada entrada
+# traduce un fallo real a una frase que el usuario puede actuar. Si un error no
+# está aquí, se muestra crudo — pero entonces falta una entrada.
+# --------------------------------------------------------------------------
+
+CATALOGO = {
+    "NONEXISTENT_VERSION": (
+        "LinkedIn retiró la versión de API que estábamos usando. El cliente busca "
+        "una vigente y reintenta solo; si ves esto, la renegociación también falló."),
+    "REVOKED_ACCESS_TOKEN": (
+        "Revocaste el acceso desde LinkedIn (o lo hizo el dueño de la app). "
+        "Corre: python auth.py login"),
+    "EXPIRED_ACCESS_TOKEN": (
+        "El token venció. Corre: python auth.py login"),
+    "INVALID_ACCESS_TOKEN": (
+        "El token no sirve. Suele pasar si rotaron el Client Secret de la app. "
+        "Corre: python auth.py login"),
+    "ACCESS_DENIED": (
+        "A la app le falta el producto 'Share on LinkedIn', o el token no pidió "
+        "el permiso w_member_social. Revisa la pestaña Products y vuelve a hacer login."),
+    "UGC_VALIDATIONS_FAILED": (
+        "LinkedIn rechazó el contenido del post. Casi siempre es un URN mal formado "
+        "o un carácter reservado sin escapar."),
+    "NOT_FOUND": (
+        "Ese post no existe. O ya lo borraste, o el URN no es de un post tuyo."),
+    "DUPLICATE_POST": (
+        "LinkedIn detectó que ya publicaste algo idéntico. Cambia el texto."),
+}
+
+
+def traducir_error(codigo: int, cuerpo: str) -> str:
+    """Convierte una respuesta cruda de LinkedIn en algo que se pueda actuar."""
+    for clave, explicacion in CATALOGO.items():
+        if clave in (cuerpo or ""):
+            return f"{explicacion} (LinkedIn dijo {clave}, HTTP {codigo})"
+    if codigo == 429:
+        return "LinkedIn está limitando las publicaciones. Espera unos minutos."
+    if codigo in (401, 403):
+        return ("LinkedIn rechazó el permiso. Revisa que el token no haya vencido "
+                "(python auth.py estado) y que la app tenga 'Share on LinkedIn'.")
+    if codigo >= 500:
+        return "LinkedIn tuvo un error de su lado. Reintenta en un momento."
+    return f"LinkedIn respondió {codigo}: {(cuerpo or '')[:200]}"
+
+
+
+# --------------------------------------------------------------------------
 # Almacén de secretos
 #
 # En macOS: Keychain, que es lo correcto.
@@ -178,6 +227,32 @@ class LinkedIn:
                 return True
         return False
 
+    def _post_con_reintento(self, payload: dict, intentos: int = 3):
+        """POST con espera creciente ante 429 y 5xx.
+
+        LinkedIn limita por app además de por persona: con varias personas
+        usando la misma app, el 429 es esperable, no excepcional. Reintentar
+        una publicación es seguro aquí porque quien llama ya pasó el control
+        de idempotencia — no se puede duplicar por reintentar.
+        """
+        espera = 2
+        for intento in range(1, intentos + 1):
+            r = requests.post(f"{API}/rest/posts", headers=self._headers(),
+                              json=payload, timeout=30)
+            if r.status_code < 500 and r.status_code != 429:
+                return r
+            if intento == intentos:
+                return r
+            pausa = espera
+            if r.status_code == 429:
+                try:
+                    pausa = min(int(r.headers.get("Retry-After", espera)), 60)
+                except (TypeError, ValueError):
+                    pass
+            time.sleep(pausa)
+            espera *= 2
+        return r
+
     def _headers(self) -> dict:
         return {
             "Authorization": f"Bearer {self.token['access_token']}",
@@ -192,7 +267,7 @@ class LinkedIn:
             return {"nombre": "Perfil de simulacro", "urn": self._urn}
         r = requests.get(f"{API}/v2/userinfo", headers=self._headers(), timeout=20)
         if r.status_code != 200:
-            raise ErrorLinkedIn(f"userinfo devolvió {r.status_code}: {r.text[:300]}")
+            raise ErrorLinkedIn(traducir_error(r.status_code, r.text))
         d = r.json()
         self._urn = f"urn:li:person:{d['sub']}"
         # El correo NO se devuelve: esta salida se proyecta en pantalla.
@@ -223,8 +298,7 @@ class LinkedIn:
             "lifecycleState": "PUBLISHED",
             "isReshareDisabledByAuthor": False,
         }
-        r = requests.post(f"{API}/rest/posts", headers=self._headers(),
-                          json=payload, timeout=30)
+        r = self._post_con_reintento(payload)
 
         # Versión caducada: renegocia una vigente y reintenta UNA vez.
         if r.status_code == 426 and "NONEXISTENT_VERSION" in r.text:
@@ -233,26 +307,12 @@ class LinkedIn:
                     f"La versión {API_VERSION} caducó y no encontré ninguna vigente "
                     "en los últimos 12 meses. Revisa la consola de LinkedIn Developer."
                 )
-            r = requests.post(f"{API}/rest/posts", headers=self._headers(),
-                              json=payload, timeout=30)
+            r = self._post_con_reintento(payload)
 
         # LinkedIn limita por app y por miembro. Con muchas personas usando la
         # misma app, esto se ve — y el mensaje crudo no dice qué hacer.
-        if r.status_code == 429:
-            espera = r.headers.get("Retry-After")
-            cuanto = f" Reintenta en {espera} segundos." if espera else " Espera unos minutos."
-            raise ErrorLinkedIn(
-                "LinkedIn está limitando las publicaciones (429)." + cuanto +
-                " No es un error tuyo: es el límite de la app o de tu cuenta."
-            )
-        if r.status_code in (401, 403):
-            raise ErrorLinkedIn(
-                f"LinkedIn rechazó el permiso ({r.status_code}). Revisa dos cosas: "
-                "que el token no haya vencido (auth.py estado) y que la app tenga "
-                f"activo el producto 'Share on LinkedIn'. Respuesta: {r.text[:200]}"
-            )
         if r.status_code != 201:
-            raise ErrorLinkedIn(f"LinkedIn respondió {r.status_code}: {r.text[:400]}")
+            raise ErrorLinkedIn(traducir_error(r.status_code, r.text))
 
         urn = r.headers.get("x-restli-id", "")
         return {
@@ -289,4 +349,4 @@ class LinkedIn:
             headers=self._headers(), timeout=30,
         )
         if r.status_code not in (200, 204):
-            raise ErrorLinkedIn(f"No se pudo borrar ({r.status_code}): {r.text[:300]}")
+            raise ErrorLinkedIn(traducir_error(r.status_code, r.text))

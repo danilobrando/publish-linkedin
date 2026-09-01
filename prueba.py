@@ -154,6 +154,35 @@ def _():
     assert isinstance(R.leer_eventos(), list)
 
 
+print("\nCATÁLOGO DE ERRORES")
+
+@prueba("traduce un token revocado")
+def _():
+    from linkedin import traducir_error
+    m = traducir_error(401, '{"code":"REVOKED_ACCESS_TOKEN"}')
+    assert "auth.py login" in m, m
+
+@prueba("traduce una versión de API caducada")
+def _():
+    from linkedin import traducir_error
+    assert "versión" in traducir_error(426, '{"code":"NONEXISTENT_VERSION"}')
+
+@prueba("un 429 sin código conocido dice qué hacer")
+def _():
+    from linkedin import traducir_error
+    assert "Espera" in traducir_error(429, "{}")
+
+@prueba("un 5xx se atribuye a LinkedIn, no al usuario")
+def _():
+    from linkedin import traducir_error
+    assert "su lado" in traducir_error(503, "")
+
+@prueba("un código desconocido no se traga el cuerpo")
+def _():
+    from linkedin import traducir_error
+    assert "418" in traducir_error(418, "raro")
+
+
 print("\nDOCTOR")
 
 @prueba("corre los chequeos sin reventar")
