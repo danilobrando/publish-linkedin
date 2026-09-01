@@ -60,6 +60,8 @@ def linkedin_quien_soy() -> str:
         yo = LinkedIn.desde_keychain().quien_soy()
     except ErrorLinkedIn as e:
         return f"✗ {e}"
+    except Exception as e:
+        return f"✗ No pude preguntarle a LinkedIn ({type(e).__name__}): {e}"
     return f"✓ {yo['nombre']}\n  {yo['urn']}"
 
 
@@ -84,9 +86,8 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
     if not texto.strip():
         return "✗ El texto está vacío."
 
-    previo = R.ya_publicado(texto)
-
     if not confirmar:
+        previo = R.ya_publicado(texto)
         R.registrar("ENSAYO", chars=len(texto), visibilidad=visibilidad,
                     huella=R.huella(texto))
         aviso = ""
@@ -102,29 +103,53 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
                 f"{escapar(texto)[:300]}{'…' if len(texto) > 300 else ''}\n\n"
                 f"Para publicarlo de verdad, vuelve a llamarme con confirmar=True.")
 
-    # Idempotencia: el fallo más caro de un publicador no es fallar, es duplicar.
-    if previo:
-        R.registrar("DUPLICADO_BLOQUEADO", huella=R.huella(texto),
-                    urn_previo=previo.get("urn", ""))
-        return (f"✗ No lo publiqué: este mismo texto ya salió el {previo['ts']}.\n"
-                f"  {previo.get('urn', '')}\n"
-                f"  Si de verdad quieres repetirlo, cambia algo del texto. Si el "
-                f"anterior estaba mal, bórralo primero con linkedin_borrar y "
-                f"entonces sí puedo republicarlo.")
+    # Sin diario no hay protección contra duplicados. Publicar a ciegas es peor
+    # que no publicar: nos negamos y lo decimos.
+    if not R.diario_sano():
+        return ("✗ No publico: no puedo escribir el diario de eventos.\n"
+                f"  {R.DIARIO_ROTO}\n"
+                "  Sin ese archivo no hay protección contra publicar dos veces "
+                "lo mismo. Corre linkedin_doctor para ver cómo arreglarlo.")
 
+    h = R.huella(texto)
     try:
         with R.Lock(f"publicar {len(texto)}c"):
+            # La idempotencia se revisa DENTRO del lock: fuera, dos procesos
+            # podían leer "no hay duplicado" a la vez y publicar los dos.
+            previo = R.ya_publicado(texto)
+            if previo:
+                R.registrar("DUPLICADO_BLOQUEADO", huella=h,
+                            urn_previo=previo.get("urn", ""))
+                return (f"✗ No lo publiqué: este mismo texto ya salió el {previo['ts']}.\n"
+                        f"  {previo.get('urn', '')}\n"
+                        f"  Si el anterior estaba mal, bórralo con linkedin_borrar y "
+                        f"vuelve a intentar.")
+
+            # Escritura anticipada: si el proceso muere, o LinkedIn acepta el
+            # post y se cae al responder, queda constancia de que SE INTENTÓ.
+            # Sin esto, un timeout deja el post vivo y sin rastro, y el próximo
+            # intento lo duplica.
+            R.registrar("INTENTO", huella=h, chars=len(texto), visibilidad=visibilidad,
+                        extracto=texto[:120])
             r = LinkedIn.desde_keychain().publicar(texto, visibilidad)
     except R.BloqueadoError as e:
-        R.registrar("BLOQUEADO", motivo=str(e))
+        R.registrar("BLOQUEADO", huella=h, motivo=str(e))
         return f"✗ {e}"
     except ErrorLinkedIn as e:
-        R.registrar("FALLO", error=str(e)[:300])
+        R.registrar("FALLO", huella=h, error=str(e)[:300])
         return f"✗ No se publicó: {e}"
+    except Exception as e:
+        # Red caída, DNS, timeout, proxy que devuelve HTML. Es el modo de falla
+        # más común y el único que antes no dejaba ni una línea en el diario.
+        R.registrar("FALLO_RED", huella=h, tipo=type(e).__name__, error=str(e)[:300])
+        return (f"✗ No se pudo publicar ({type(e).__name__}): {e}\n"
+                f"  OJO: si esto fue un timeout, el post PUDO haberse creado. "
+                f"Revisa tu perfil antes de reintentar.\n"
+                f"  Diagnostica con linkedin_doctor.")
 
     R.registrar("PUBLICADO", urn=r["urn"], chars=r["caracteres"],
-                visibilidad=r["visibilidad"], huella=R.huella(texto),
-                simulacro=bool(r.get("simulacro")))
+                visibilidad=r["visibilidad"], huella=h,
+                extracto=texto[:120], simulacro=bool(r.get("simulacro")))
     if r.get("simulacro"):
         return (f"🧪 SIMULACRO — no se tocó LinkedIn (PUBLISH_LINKEDIN_SIMULACRO activo).\n"
                 f"  URN falso: {r['urn']}")
@@ -132,21 +157,40 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
 
 
 @mcp.tool()
-def linkedin_borrar(urn: str) -> str:
-    """Borra un post que acabas de publicar. El botón de deshacer.
+def linkedin_borrar(urn: str, confirmar: bool = False) -> str:
+    """Borra un post publicado. El botón de deshacer.
+
+    FRENO DE MANO: igual que publicar, no borra sin confirmar=True. Borrar es
+    irreversible y el URN puede venir de cualquier parte del contexto.
 
     Args:
         urn: el URN que devolvió linkedin_publicar (urn:li:share:… o urn:li:ugcPost:…)
+        confirmar: True para borrar de verdad. False = solo dice qué borraría.
     """
+    try:
+        limpio_previo = LinkedIn.limpiar_urn(urn)
+    except ErrorLinkedIn as e:
+        return f"✗ {e}"
+    if not confirmar:
+        return (f"⏸  ENSAYO — no se borró nada.\n"
+                f"Se borraría de LinkedIn, de forma irreversible:\n"
+                f"  {limpio_previo}\n"
+                f"  https://www.linkedin.com/feed/update/{limpio_previo}/\n\n"
+                f"Para borrarlo de verdad, vuelve a llamarme con confirmar=True.")
     try:
         LinkedIn.desde_keychain().borrar(urn)
     except ErrorLinkedIn as e:
         R.registrar("FALLO_BORRAR", urn=urn, error=str(e)[:300])
         return f"✗ No se pudo borrar: {e}"
-    limpio = LinkedIn.limpiar_urn(urn)
-    R.registrar("BORRADO", urn=limpio)
-    R.olvidar(limpio)   # su huella deja de bloquear una republicación
-    return f"✓ Borrado de LinkedIn: {limpio}"
+    except Exception as e:
+        R.registrar("FALLO_BORRAR", urn=urn, tipo=type(e).__name__, error=str(e)[:300])
+        return f"✗ No se pudo borrar ({type(e).__name__}): {e}"
+    from linkedin import SIMULACRO
+    R.registrar("BORRADO", urn=limpio_previo, simulacro=SIMULACRO)
+    R.olvidar(limpio_previo)   # su huella deja de bloquear una republicación
+    if SIMULACRO:
+        return f"🧪 SIMULACRO — no se tocó LinkedIn. URN: {limpio_previo}"
+    return f"✓ Borrado de LinkedIn: {limpio_previo}"
 
 
 @mcp.tool()

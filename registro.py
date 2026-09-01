@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 import time
 from pathlib import Path
 
@@ -49,23 +50,49 @@ def huella(texto: str) -> str:
     return hashlib.sha256(normal.encode("utf-8")).hexdigest()[:16]
 
 
+# Si el diario de eventos deja de escribirse, la idempotencia se queda ciega
+# sin avisar: `ya_publicado` consulta ESE archivo. Un `sudo python doctor.py`
+# basta para dejarlo root:wheel y romperlo para siempre, en silencio.
+# Por eso el fallo se recuerda y se grita una vez.
+DIARIO_ROTO: str | None = None
+
+
 def registrar(evento: str, **campos) -> None:
-    """Escribe en los dos diarios. Nunca revienta al llamador."""
-    _asegurar_home()
+    """Escribe en los dos diarios.
+
+    No revienta al llamador —perder el log no debe tumbar una publicación—
+    pero tampoco se calla: deja `DIARIO_ROTO` puesto para que quien publica
+    pueda negarse, y avisa una sola vez por stderr.
+    """
+    global DIARIO_ROTO
     ahora = time.time()
     marca = time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime(ahora))
     try:
+        _asegurar_home()
         fila = {"ts": marca, "epoch": int(ahora), "evento": evento, **campos}
         with EVENTOS.open("a", encoding="utf-8") as f:
             f.write(json.dumps(fila, ensure_ascii=False) + "\n")
-    except OSError:
-        pass
+        DIARIO_ROTO = None
+    except OSError as e:
+        if DIARIO_ROTO is None:
+            print(f"publish-linkedin: NO puedo escribir {EVENTOS} ({e}). "
+                  "Sin ese archivo no hay protección contra duplicados.",
+                  file=sys.stderr)
+        DIARIO_ROTO = str(e)
     try:
-        extra = "\t".join(f"{k}={v}" for k, v in campos.items() if k != "texto")
+        # Los saltos de línea romperían el formato de una línea por evento.
+        extra = "\t".join(f"{k}={str(v).replace(chr(10), ' ')}"
+                           for k, v in campos.items() if k != "texto")
         with DIARIO.open("a", encoding="utf-8") as f:
             f.write(f"{marca}\t{evento}\t{extra}\n")
     except OSError:
         pass
+
+
+def diario_sano() -> bool:
+    """¿Se puede confiar en el diario para no duplicar? Verifica escribiendo."""
+    registrar("CHEQUEO", origen="diario_sano")
+    return DIARIO_ROTO is None
 
 
 def leer_eventos(desde_epoch: int = 0) -> list[dict]:
@@ -73,17 +100,20 @@ def leer_eventos(desde_epoch: int = 0) -> list[dict]:
         return []
     out = []
     try:
-        for linea in EVENTOS.read_text(encoding="utf-8").splitlines():
-            if not linea.strip():
-                continue
-            try:
-                d = json.loads(linea)
-            except json.JSONDecodeError:
-                continue  # una línea corrupta no invalida el diario
-            if d.get("epoch", 0) >= desde_epoch:
-                out.append(d)
+        crudo = EVENTOS.read_text(encoding="utf-8", errors="replace")
     except OSError:
         return []
+    for linea in crudo.splitlines():
+        if not linea.strip():
+            continue
+        try:
+            d = json.loads(linea)
+        except json.JSONDecodeError:
+            continue  # una línea corrupta no invalida el diario
+        if not isinstance(d, dict):
+            continue  # json válido pero no un evento (p.ej. "null" o un número)
+        if d.get("epoch", 0) >= desde_epoch:
+            out.append(d)
     return out
 
 
@@ -99,6 +129,8 @@ def ya_publicado(texto: str) -> dict | None:
     for d in reversed(leer_eventos(corte)):
         if d.get("huella") != h:
             continue
+        if d.get("simulacro"):
+            continue  # un post de simulacro nunca salió: no debe bloquear el real
         if d.get("evento") == "ANULADO":
             return None
         if d.get("evento") == "PUBLICADO":
@@ -130,27 +162,57 @@ class Lock:
         self.motivo = motivo
         self.tomado = False
 
+    def _crear_exclusivo(self) -> bool:
+        """Crea el lock de forma atómica. False si ya existía.
+
+        `O_CREAT | O_EXCL` es una sola operación del sistema: o lo creas tú, o
+        alguien más lo tenía. La versión anterior hacía `exists()` y después
+        `write_text()` — dos pasos, con una ventana en medio por la que
+        entraban varios publicadores a la vez. Medido: 2 de 8 procesos.
+        """
+        try:
+            fd = os.open(str(LOCK), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            return False
+        with os.fdopen(fd, "w") as f:
+            f.write(f"pid={os.getpid()} {self.motivo} {time.strftime('%H:%M:%S')}")
+        return True
+
     def __enter__(self) -> "Lock":
         _asegurar_home()
-        if LOCK.exists():
+        if self._crear_exclusivo():
+            self.tomado = True
+            return self
+
+        # Ya había uno. ¿Está vivo o quedó de un proceso muerto?
+        try:
+            edad = time.time() - LOCK.stat().st_mtime
+        except OSError:
+            # Desapareció entre medio: alguien lo soltó. Un intento más.
+            if self._crear_exclusivo():
+                self.tomado = True
+                return self
+            edad = 0
+        if edad < LOCK_RANCIO:
+            dueno = ""
             try:
-                edad = time.time() - LOCK.stat().st_mtime
+                dueno = LOCK.read_text(encoding="utf-8").strip()[:120]
             except OSError:
-                edad = LOCK_RANCIO + 1
-            if edad < LOCK_RANCIO:
-                dueno = ""
-                try:
-                    dueno = LOCK.read_text(encoding="utf-8").strip()[:120]
-                except OSError:
-                    pass
-                raise BloqueadoError(
-                    f"Hay otra publicación en curso desde hace {int(edad)}s"
-                    + (f" ({dueno})" if dueno else "")
-                    + ". Espera a que termine."
-                )
-            registrar("LOCK_RANCIO_ROBADO", edad_s=int(edad))
-        LOCK.write_text(f"pid={os.getpid()} {self.motivo} {time.strftime('%H:%M:%S')}",
-                        encoding="utf-8")
+                pass
+            raise BloqueadoError(
+                f"Hay otra publicación en curso desde hace {int(edad)}s"
+                + (f" ({dueno})" if dueno else "")
+                + ". Espera a que termine."
+            )
+
+        # Rancio: se roba, pero de forma que solo UNO gane la carrera.
+        try:
+            os.unlink(str(LOCK))
+        except OSError:
+            pass
+        if not self._crear_exclusivo():
+            raise BloqueadoError("Otro proceso se quedó con el lock. Reintenta.")
+        registrar("LOCK_RANCIO_ROBADO", edad_s=int(edad))
         self.tomado = True
         return self
 

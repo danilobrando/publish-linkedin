@@ -35,6 +35,14 @@ def _chequeo(nombre, estado, detalle, arreglo=""):
 def correr_chequeos() -> list[dict]:
     out = []
 
+    # 0 · Simulacro. Si está activo, NADA de lo que sigue tocó LinkedIn: un
+    # tablero verde aquí no significa que el conector funcione. El vigilante
+    # diario quedaría ciego sin este aviso.
+    if os.environ.get("PUBLISH_LINKEDIN_SIMULACRO", "") not in ("", "0", "false"):
+        out.append(_chequeo("Modo", AVISO,
+                            "SIMULACRO activo: no se contacta a LinkedIn",
+                            "unset PUBLISH_LINKEDIN_SIMULACRO para un diagnóstico real"))
+
     # 1 · Dependencias
     try:
         import mcp, requests  # noqa: F401
@@ -96,13 +104,21 @@ def correr_chequeos() -> list[dict]:
         out.append(_chequeo("LinkedIn responde", MAL, f"sin conexión: {type(e).__name__}",
                             "Revisa tu internet y vuelve a correr el doctor"))
 
-    # 7 · Diarios escribibles
-    try:
-        R.registrar("DOCTOR", chequeo="escritura")
-        out.append(_chequeo("Diarios", OK, f"{R.HOME}"))
-    except Exception as e:
-        out.append(_chequeo("Diarios", MAL, f"no se puede escribir: {e}",
-                            f"Revisa permisos de {R.HOME}"))
+    # 7 · Diarios escribibles — se verifica LEYENDO DE VUELTA.
+    # Antes era `try: registrar() except: MAL`, y como registrar() nunca levanta
+    # excepciones, el chequeo era estructuralmente incapaz de fallar: juraba que
+    # los diarios se escribían mientras no se escribían.
+    marca = f"doctor-{os.getpid()}-{int(time.time())}"
+    R.registrar("DOCTOR", chequeo=marca)
+    if R.DIARIO_ROTO:
+        out.append(_chequeo("Diarios", MAL, f"no se puede escribir: {R.DIARIO_ROTO}",
+                            f"Revisa permisos de {R.EVENTOS} y de {R.HOME}"))
+    elif any(d.get("chequeo") == marca for d in R.leer_eventos(int(time.time()) - 60)):
+        out.append(_chequeo("Diarios", OK, f"{R.HOME} (escrito y releído)"))
+    else:
+        out.append(_chequeo("Diarios", MAL,
+                            "escribí pero no pude releer el evento",
+                            f"Revisa {R.EVENTOS}: puede estar corrupto o lleno"))
 
     # 8 · Lock
     if R.LOCK.exists():
@@ -120,6 +136,12 @@ def correr_chequeos() -> list[dict]:
     out.append(_chequeo("Redirect URI", OK, REDIRECT_URI +
                         "  ← debe estar igual en la pestaña Auth de tu app"))
     return out
+
+
+def version() -> str:
+    """Versión del conector. Para que un reporte de bug diga contra qué corría."""
+    v = (Path(__file__).parent / "VERSION")
+    return v.read_text(encoding="utf-8").strip() if v.exists() else "desconocida"
 
 
 def veredicto(chequeos: list[dict]) -> str:
@@ -201,4 +223,13 @@ def fix(quiet: bool = False) -> int:
 if __name__ == "__main__":
     args = sys.argv[1:]
     quiet = "--quiet" in args or "-q" in args
-    sys.exit(fix(quiet) if "fix" in args else doctor(quiet))
+    libres = [a for a in args if not a.startswith("-")]
+    cmd = libres[0] if libres else "doctor"
+    if cmd == "version" or "--version" in args:
+        print(version())
+        sys.exit(0)
+    if cmd not in ("doctor", "fix"):
+        print(f"Comando desconocido: {cmd}\n"
+              "Usa: doctor [--quiet] | fix [--quiet] | version", file=sys.stderr)
+        sys.exit(64)   # EX_USAGE
+    sys.exit(fix(quiet) if cmd == "fix" else doctor(quiet))

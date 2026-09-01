@@ -38,7 +38,10 @@ KC_TOKEN = "PUBLISH_LINKEDIN_TOKEN"
 # Caracteres reservados del formato "little text" de LinkedIn. Sin escapar,
 # el post se trunca o se deforma en silencio.
 # https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/little-text-format
-RESERVADOS = ["\\", "|", "{", "}", "[", "]", "<", ">", "*", "_", "~"]
+# El backslash va PRIMERO o se escaparían los escapes que agregamos después.
+# '@', '(' y ')' también son reservados según la doc de little text: sin
+# escaparlos, un "(hola)" puede interpretarse como marcado y deformar el post.
+RESERVADOS = ["\\", "|", "{", "}", "[", "]", "(", ")", "<", ">", "*", "_", "~", "@"]
 
 # Freno de seguridad para pruebas. Con PUBLISH_LINKEDIN_SIMULACRO=1, publicar()
 # y borrar() NUNCA tocan la red: devuelven una respuesta falsa y lo declaran.
@@ -228,27 +231,29 @@ class LinkedIn:
         return False
 
     def _post_con_reintento(self, payload: dict, intentos: int = 3):
-        """POST con espera creciente ante 429 y 5xx.
+        """POST reintentando SOLO ante 429.
 
-        LinkedIn limita por app además de por persona: con varias personas
-        usando la misma app, el 429 es esperable, no excepcional. Reintentar
-        una publicación es seguro aquí porque quien llama ya pasó el control
-        de idempotencia — no se puede duplicar por reintentar.
+        Un 429 significa que LinkedIn rechazó la petición sin procesarla: es
+        seguro repetirla. Un 5xx NO dice nada — LinkedIn pudo haber creado el
+        post y haberse caído al responder (típico cuando hay un CDN de por
+        medio). Reintentar ahí publica dos veces.
+
+        Esto estuvo mal escrito: el código reintentaba también ante 5xx, con un
+        comentario que afirmaba que era seguro "porque quien llama ya pasó el
+        control de idempotencia". Era falso — ese control lee eventos ya
+        escritos, y el PUBLICADO de esta llamada todavía no existe. El fallo
+        más caro del proyecto estaba dentro del intento de evitarlo.
         """
         espera = 2
         for intento in range(1, intentos + 1):
             r = requests.post(f"{API}/rest/posts", headers=self._headers(),
                               json=payload, timeout=30)
-            if r.status_code < 500 and r.status_code != 429:
+            if r.status_code != 429 or intento == intentos:
                 return r
-            if intento == intentos:
-                return r
-            pausa = espera
-            if r.status_code == 429:
-                try:
-                    pausa = min(int(r.headers.get("Retry-After", espera)), 60)
-                except (TypeError, ValueError):
-                    pass
+            try:
+                pausa = min(int(r.headers.get("Retry-After", espera)), 60)
+            except (TypeError, ValueError):
+                pausa = espera
             time.sleep(pausa)
             espera *= 2
         return r
@@ -276,8 +281,14 @@ class LinkedIn:
     def publicar(self, texto: str, visibilidad: str = "PUBLIC") -> dict:
         if not texto.strip():
             raise ErrorLinkedIn("El texto está vacío.")
-        if len(texto) > 3000:
-            raise ErrorLinkedIn(f"El texto tiene {len(texto)} caracteres; el máximo es 3000.")
+        # LinkedIn cuenta el texto YA escapado. Un post lleno de reservados
+        # puede pasar de 3000 al escaparse aunque el original no llegara.
+        escapado = escapar(texto)
+        if len(escapado) > 3000:
+            extra = f" (queda en {len(escapado)} al escapar los caracteres reservados)" \
+                if len(escapado) != len(texto) else ""
+            raise ErrorLinkedIn(
+                f"El texto tiene {len(texto)} caracteres{extra}; el máximo es 3000.")
         if self._urn is None:
             self.quien_soy()
 
@@ -288,7 +299,7 @@ class LinkedIn:
 
         payload = {
             "author": self._urn,
-            "commentary": escapar(texto),
+            "commentary": escapado,
             "visibility": visibilidad,
             "distribution": {
                 "feedDistribution": "MAIN_FEED",
@@ -311,6 +322,12 @@ class LinkedIn:
 
         # LinkedIn limita por app y por miembro. Con muchas personas usando la
         # misma app, esto se ve — y el mensaje crudo no dice qué hacer.
+        if r.status_code >= 500:
+            raise ErrorLinkedIn(
+                f"LinkedIn falló de su lado ({r.status_code}) y NO reintenté a "
+                "propósito: puede que el post SÍ se haya creado y no lo sepamos. "
+                "Revisa tu perfil antes de volver a publicar."
+            )
         if r.status_code != 201:
             raise ErrorLinkedIn(traducir_error(r.status_code, r.text))
 

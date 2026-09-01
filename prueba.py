@@ -183,6 +183,93 @@ def _():
     assert "418" in traducir_error(418, "raro")
 
 
+print("\nREGRESIONES DE LA REVISIÓN DE EXPERTOS")
+
+@prueba("5xx NO se reintenta (reintentar duplicaba el post)")
+def _():
+    import inspect
+    from linkedin import LinkedIn
+    src = inspect.getsource(LinkedIn._post_con_reintento)
+    assert "!= 429" in src, "debe reintentar solo ante 429"
+    assert "status_code < 500" not in src, "no debe reintentar ante 5xx"
+
+@prueba("el límite de 3000 se mide sobre el texto YA escapado")
+def _():
+    from linkedin import LinkedIn, ErrorLinkedIn
+    import time
+    cli = LinkedIn({"access_token": "x", "expires_at": time.time() + 999})
+    # 1600 asteriscos -> 3200 al escapar
+    try:
+        cli.publicar("*" * 1600)
+        assert False, "debió rechazarlo por longitud"
+    except ErrorLinkedIn as e:
+        assert "3000" in str(e), e
+
+@prueba("los reservados incluyen paréntesis y arroba")
+def _():
+    from linkedin import escapar
+    assert escapar("(hola)") == "\\(hola\\)"
+    assert escapar("a@b") == "a\\@b"
+
+@prueba("un evento de simulacro no bloquea la publicación real")
+def _():
+    R.registrar("PUBLICADO", huella=R.huella("sim"), urn="urn:li:share:SIMULACRO1",
+                simulacro=True)
+    assert R.ya_publicado("sim") is None, "un simulacro no debe bloquear"
+
+@prueba("el diario roto se detecta y se recuerda")
+def _():
+    import os
+    R.registrar("previo", x=1)
+    modo = R.EVENTOS.stat().st_mode
+    os.chmod(R.EVENTOS, 0o400)
+    try:
+        R.DIARIO_ROTO = None
+        assert R.diario_sano() is False, "debe detectar que no puede escribir"
+        assert R.DIARIO_ROTO, "debe recordar el motivo"
+    finally:
+        os.chmod(R.EVENTOS, modo)
+        R.DIARIO_ROTO = None
+
+@prueba("leer_eventos aguanta json válido pero no-objeto")
+def _():
+    with R.EVENTOS.open("a") as f:
+        f.write("null\n42\n[1,2]\n")
+    assert isinstance(R.leer_eventos(), list)
+
+@prueba("el diario humano no se parte con errores multilínea")
+def _():
+    R.registrar("FALLO", error="linea1\nlinea2\nlinea3")
+    ultima = R.DIARIO.read_text(encoding="utf-8").strip().splitlines()[-1]
+    assert "linea1 linea2 linea3" in ultima, ultima
+
+@prueba("el chequeo de diarios SÍ puede fallar")
+def _():
+    import os, doctor as D
+    modo = R.EVENTOS.stat().st_mode
+    os.chmod(R.EVENTOS, 0o400)
+    try:
+        R.DIARIO_ROTO = None
+        c = [x for x in D.correr_chequeos() if x["nombre"] == "Diarios"][0]
+        assert c["estado"] == D.MAL, "el chequeo era incapaz de fallar"
+    finally:
+        os.chmod(R.EVENTOS, modo)
+        R.DIARIO_ROTO = None
+
+@prueba("el doctor avisa cuando el simulacro está activo")
+def _():
+    import doctor as D
+    nombres = [c["nombre"] for c in D.correr_chequeos()]
+    assert "Modo" in nombres, "debe avisar que no tocó LinkedIn"
+
+@prueba("borrar tiene freno de mano")
+def _():
+    import inspect, server
+    assert "confirmar" in inspect.signature(server.linkedin_borrar.fn
+                                            if hasattr(server.linkedin_borrar, "fn")
+                                            else server.linkedin_borrar).parameters
+
+
 print("\nDOCTOR")
 
 @prueba("corre los chequeos sin reventar")
