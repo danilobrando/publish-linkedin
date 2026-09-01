@@ -1,7 +1,12 @@
 # Hardening
 
-Estado al **31-ago-2026, 20:25**. El repo es público y lo clonaron ~83 personas
-el mismo día, así que el hardening dejó de ser opcional.
+Estado al **31-ago-2026**. El repo es público y lo clonó una cohorte entera el
+mismo día, así que el hardening dejó de ser opcional.
+
+**Nota sobre credenciales compartidas:** el README contempla un plan B en el que
+un instructor presta su Client ID y Secret. En la clase del 31-ago **no se usó**:
+el estudiante que compartió pantalla creó su propia Página y su propia app en
+vivo. Ningún secreto salió de su dueño, y no hay nada que rotar.
 
 ## Hecho
 
@@ -66,7 +71,6 @@ Lo más grave que encontraron, y que yo mismo había introducido:
 - [ ] `--dry-run` en la CLI (hoy el ensayo solo existe en la herramienta MCP).
 - [ ] No hay forma de **revocar** un token: `auth.py login` emite uno nuevo pero
       no invalida el anterior. Hoy se revoca desde la configuración de LinkedIn.
-- [ ] Rotar el Client Secret — se compartió con ~83 personas el 31-ago.
 
 ## Decisión: publicar sin humano
 
