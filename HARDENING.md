@@ -1,57 +1,55 @@
-# Hardening pendiente
+# Hardening
 
-Lo que hay hoy es **el mínimo que publica**, construido contra reloj para la
-sesión de cierre de SB Cohorte II (31-ago-2026). Es un subconjunto estricto
-del estándar de conectores (`~/.claude/specs/connector-standard.md`): nada de
-lo escrito se bota, falta lo de abajo.
+Estado al **31-ago-2026, 20:25**. El repo es público y lo clonaron ~83 personas
+el mismo día, así que el hardening dejó de ser opcional.
 
-## Ya cumple
+## Hecho
 
-- [x] Config por entorno (`PUBLISH_LINKEDIN_LOG`, `PUBLISH_LINKEDIN_HOME`)
-- [x] Secretos fuera del código (Keychain en macOS · archivo 0600 en Windows/Linux)
-- [x] Diario de auditoría de toda publicación
-- [x] Anti-CSRF: validación del `state` de OAuth
-- [x] Freno de mano (ensayo por defecto, `confirmar=True` para publicar)
-- [x] Repo con git
+| | Qué | Dónde |
+|---|---|---|
+| ✅ | Config por entorno | `PUBLISH_LINKEDIN_{HOME,LOG,JSONL,VENTANA_H,SIMULACRO}` |
+| ✅ | Secretos fuera del código | Keychain (macOS) · archivo 0600 (Windows/Linux) |
+| ✅ | Anti-CSRF: validación del `state` de OAuth | `auth.py` |
+| ✅ | Freno de mano (`confirmar=True`) | `server.py` |
+| ✅ | **Idempotencia** por huella de contenido, ventana 24h | `registro.py` |
+| ✅ | **Lock** con robo de lock rancio a las 2h | `registro.py` |
+| ✅ | Diario jsonl consultable + diario legible | `registro.py` |
+| ✅ | **`doctor`** — 9 chequeos con acción por cada fallo | `doctor.py` |
+| ✅ | **`fix`** — repara locks rancios y permisos; `--quiet` | `doctor.py` |
+| ✅ | **`SIMULACRO`** — las pruebas no pueden tocar la red | `linkedin.py` |
+| ✅ | Suite de 24 pruebas, siempre bajo simulacro | `prueba.py` |
+| ✅ | Catálogo de 8 errores de LinkedIn traducidos a acción | `linkedin.py` |
+| ✅ | Backoff ante 429/5xx respetando `Retry-After` | `linkedin.py` |
+| ✅ | Renegociación de versión de API caducada | `linkedin.py` |
+| ✅ | `SKILL.md` con AUTO-RECOVERY POLICY | `SKILL.md` |
+| ✅ | Vigilante diario + LaunchAgent | `vigilante.sh` |
+| ✅ | Repo público, MIT | `github.com/danilobrando/publish-linkedin` |
 
-## Falta — P0 (antes de dejarlo correr solo)
+## Los tres incidentes que originaron esto
 
-- [ ] **`doctor`** — 8 chequeos: Keychain, vigencia del token, permiso
-      `w_member_social`, red, producto Share on LinkedIn activo, redirect URI,
-      diario escribible, dependencias.
-- [ ] **`fix`** — auto-reparación con `--quiet`, para la política de
-      AUTO-RECOVERY del SKILL.md.
-- [ ] **Refresh de token.** Hoy el token dura ~60 días y expira sin aviso.
-      LinkedIn da `refresh_token` solo a apps aprobadas — verificar si la app
-      califica; si no, alarma a los 7 días de vencer.
-- [ ] **Lock + robo de lock rancio (2h)** — sin esto, dos ejecuciones
-      simultáneas publican el mismo post dos veces.
-- [ ] **Idempotencia.** Hash del texto en el diario; rechazar republicar el
-      mismo contenido dentro de 24h. Es el fallo más caro: duplicar en
-      público.
-- [ ] **Borrar las credenciales en texto plano** del `.mcp.json` heredado de
-      la configuración anterior (quedan con permisos 644). Ya están en el
-      almacén seguro. El riesgo es local, no publicado — pero aparece en
-      pantalla si alguna vez compartes ese archivo.
+Ninguno es hipotético. Los tres pasaron el 31-ago-2026.
 
-## Falta — P1
+1. **Un subagente publicó en el perfil real** usando otro servidor MCP que no
+   tenía freno de mano. → Se eliminó ese servidor; el freno aquí es obligatorio.
+2. **Una prueba automatizada publicó de verdad.** Redirigir `PUBLISH_LINKEDIN_HOME`
+   no basta: el token vive en el Keychain y sigue siendo válido. → `SIMULACRO`.
+3. **La versión de API estaba caducada** (`426 NONEXISTENT_VERSION`) y no se supo
+   hasta la primera publicación real. → `_renegociar_version()`.
 
-- [ ] Sentinels + jsonl estructurado
-- [ ] Reintento con backoff ante 429 (LinkedIn limita por app y por miembro)
-- [ ] `--dry-run` y `--quiet` en la CLI, no solo en la herramienta MCP
-- [ ] Catálogo de errores de LinkedIn (equivalente al catálogo AADSTS de
-      `ingest-outlook`)
-- [ ] SKILL.md con AUTO-RECOVERY POLICY
-- [ ] LaunchAgent para la publicación programada
-- [ ] Review de 5 expertos (Charity, Aaron, Simon, Allspaw, Filippo) → P0+P1
-- [ ] Review de productización (Adam, Mitchell, Mike)
-- [x] Repo `danilobrando/publish-linkedin`, MIT — público desde el 31-ago-2026
-      para la cohorte. Ojo: público adelanta el hardening de abajo.
+## Falta
 
-## Decisión pendiente
+- [ ] **Sin `refresh_token`.** Verificado: LinkedIn no lo entrega a esta app, así
+      que hay que volver a autorizar cada ~60 días. `auth.py` ya lo guarda si
+      algún día llega, y el vigilante avisa 7 días antes. **Mitigado, no resuelto.**
+- [ ] Windows y Linux: el código los contempla pero **nadie los ha probado**.
+- [ ] Sentinels de última corrida exitosa.
+- [ ] `--dry-run` en la CLI (hoy el ensayo solo existe en la herramienta MCP).
+- [ ] Rotar el Client Secret — se compartió con ~83 personas el 31-ago.
 
-**¿Publicar sin humano, alguna vez?** Hoy exige `confirmar=True`, lo que
-significa que un humano lee cada post antes de que salga. Es la postura
-correcta para arrancar. Automatizar el `confirmar` requiere primero:
-idempotencia, límite diario duro, y un juez de calidad que pueda vetar.
-No antes.
+## Decisión: publicar sin humano
+
+**No.** Hoy `linkedin_publicar` exige `confirmar=True`, lo que significa que
+alguien lee cada post antes de que salga. Automatizar esa confirmación requiere
+antes: límite diario duro, un juez de calidad que pueda vetar, y una ventana de
+retracción automática. La idempotencia y el lock ya están — eran el requisito
+mínimo, no la autorización.

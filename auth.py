@@ -129,11 +129,23 @@ def login() -> None:
         sys.exit(1)
 
     d = r.json()
-    guardar_token({
+    token = {
         "access_token": d["access_token"],
         "expires_at": int(time.time()) + int(d.get("expires_in", 0)),
         "scopes": SCOPES,
-    })
+    }
+    # LinkedIn solo entrega refresh_token a apps aprobadas para ello. La mayoría
+    # no lo recibe y hay que volver a autorizar cada ~60 días. Si algún día llega,
+    # lo guardamos para poder renovarlo sin intervención.
+    if d.get("refresh_token"):
+        token["refresh_token"] = d["refresh_token"]
+        token["refresh_expires_at"] = int(time.time()) + int(
+            d.get("refresh_token_expires_in", 0))
+        print("✓ La app entrega refresh_token: se podrá renovar sin volver a autorizar.")
+    else:
+        print("  Nota: esta app no entrega refresh_token. Vas a tener que volver a")
+        print("  correr 'auth.py login' cuando venza (~60 días). El vigilante te avisa.")
+    guardar_token(token)
     print("✓ Token guardado en el Keychain.")
     yo = LinkedIn.desde_keychain().quien_soy()
     print(f"✓ Autenticado como {yo['nombre']} ({yo['urn']})")
