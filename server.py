@@ -21,22 +21,14 @@ from pathlib import Path
 
 from mcp.server.mcpserver import MCPServer
 
+import registro as R
 from linkedin import (ErrorLinkedIn, LinkedIn, cargar_token,
                       donde_viven_los_secretos, escapar, kc_leer,
                       KC_CLIENT_ID)
 
 mcp = MCPServer("publish-linkedin")
 
-DIARIO = Path(os.environ.get(
-    "PUBLISH_LINKEDIN_LOG",
-    Path.home() / ".config" / "publish-linkedin" / "publicaciones.log",
-))
-
-
-def _registrar(linea: str) -> None:
-    DIARIO.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    with DIARIO.open("a", encoding="utf-8") as f:
-        f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')}\t{linea}\n")
+DIARIO = R.DIARIO
 
 
 @mcp.tool()
@@ -92,22 +84,50 @@ def linkedin_publicar(texto: str, confirmar: bool = False,
     if not texto.strip():
         return "✗ El texto está vacío."
 
+    previo = R.ya_publicado(texto)
+
     if not confirmar:
-        _registrar(f"ENSAYO\t{len(texto)} chars\t{visibilidad}")
-        return (f"⏸  ENSAYO — no se publicó nada.\n\n"
+        R.registrar("ENSAYO", chars=len(texto), visibilidad=visibilidad,
+                    huella=R.huella(texto))
+        aviso = ""
+        if previo:
+            aviso = (f"\n⚠️  OJO: este mismo texto ya se publicó el {previo['ts']}.\n"
+                     f"    {previo.get('urn', '')}\n"
+                     f"    Si confirmas, me voy a negar. Cambia el texto, o borra el "
+                     f"anterior con linkedin_borrar.\n")
+        return (f"⏸  ENSAYO — no se publicó nada.\n{aviso}\n"
                 f"Se enviaría a LinkedIn ({visibilidad}, {len(texto)}/3000 caracteres):\n"
                 f"{'─' * 60}\n{texto}\n{'─' * 60}\n"
                 f"Tal como lo recibe la API (con reservados escapados):\n"
                 f"{escapar(texto)[:300]}{'…' if len(texto) > 300 else ''}\n\n"
                 f"Para publicarlo de verdad, vuelve a llamarme con confirmar=True.")
 
+    # Idempotencia: el fallo más caro de un publicador no es fallar, es duplicar.
+    if previo:
+        R.registrar("DUPLICADO_BLOQUEADO", huella=R.huella(texto),
+                    urn_previo=previo.get("urn", ""))
+        return (f"✗ No lo publiqué: este mismo texto ya salió el {previo['ts']}.\n"
+                f"  {previo.get('urn', '')}\n"
+                f"  Si de verdad quieres repetirlo, cambia algo del texto. Si el "
+                f"anterior estaba mal, bórralo primero con linkedin_borrar y "
+                f"entonces sí puedo republicarlo.")
+
     try:
-        r = LinkedIn.desde_keychain().publicar(texto, visibilidad)
+        with R.Lock(f"publicar {len(texto)}c"):
+            r = LinkedIn.desde_keychain().publicar(texto, visibilidad)
+    except R.BloqueadoError as e:
+        R.registrar("BLOQUEADO", motivo=str(e))
+        return f"✗ {e}"
     except ErrorLinkedIn as e:
-        _registrar(f"FALLO\t{e}")
+        R.registrar("FALLO", error=str(e)[:300])
         return f"✗ No se publicó: {e}"
 
-    _registrar(f"PUBLICADO\t{r['urn']}\t{r['caracteres']} chars\t{r['visibilidad']}")
+    R.registrar("PUBLICADO", urn=r["urn"], chars=r["caracteres"],
+                visibilidad=r["visibilidad"], huella=R.huella(texto),
+                simulacro=bool(r.get("simulacro")))
+    if r.get("simulacro"):
+        return (f"🧪 SIMULACRO — no se tocó LinkedIn (PUBLISH_LINKEDIN_SIMULACRO activo).\n"
+                f"  URN falso: {r['urn']}")
     return f"✓ Publicado.\n  {r['url']}\n  {r['urn']}"
 
 
@@ -121,10 +141,46 @@ def linkedin_borrar(urn: str) -> str:
     try:
         LinkedIn.desde_keychain().borrar(urn)
     except ErrorLinkedIn as e:
-        _registrar(f"FALLO_BORRAR\t{urn}\t{e}")
+        R.registrar("FALLO_BORRAR", urn=urn, error=str(e)[:300])
         return f"✗ No se pudo borrar: {e}"
-    _registrar(f"BORRADO\t{urn}")
-    return f"✓ Borrado de LinkedIn: {urn}"
+    limpio = LinkedIn.limpiar_urn(urn)
+    R.registrar("BORRADO", urn=limpio)
+    R.olvidar(limpio)   # su huella deja de bloquear una republicación
+    return f"✓ Borrado de LinkedIn: {limpio}"
+
+
+@mcp.tool()
+def linkedin_doctor(reparar: bool = False) -> str:
+    """Diagnostica el conector: credenciales, token, permisos, red, diarios, lock.
+
+    Úsame cuando el usuario reporte CUALQUIER problema con LinkedIn antes de
+    ponerte a adivinar.
+
+    Args:
+        reparar: True intenta arreglar solo lo que se pueda (locks rancios, permisos).
+    """
+    import doctor as D
+    if reparar:
+        hechos, pendientes = [], []
+        if D.R.LOCK.exists():
+            edad = time.time() - D.R.LOCK.stat().st_mtime
+            if edad > D.R.LOCK_RANCIO:
+                try:
+                    D.R.LOCK.unlink()
+                    hechos.append(f"Quité un lock rancio de {int(edad / 3600)}h")
+                except OSError as e:
+                    pendientes.append(f"No pude quitar el lock: {e}")
+    cs = D.correr_chequeos()
+    ancho = max(len(c["nombre"]) for c in cs)
+    lineas = [f"{D.ICONO[c['estado']]} {c['nombre'].ljust(ancho)}  {c['detalle']}"
+              + (f"\n  {' ' * ancho}  → {c['arreglo']}"
+                 if c["arreglo"] and c["estado"] != D.OK else "")
+              for c in cs]
+    v = D.veredicto(cs)
+    resumen = {D.OK: "Todo en orden.",
+               D.AVISO: "Funciona, pero hay algo que atender.",
+               D.MAL: "Hay algo roto — mira las flechas."}[v]
+    return "\n".join(lineas) + f"\n\n{resumen}"
 
 
 if __name__ == "__main__":

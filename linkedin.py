@@ -40,6 +40,15 @@ KC_TOKEN = "PUBLISH_LINKEDIN_TOKEN"
 # https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/little-text-format
 RESERVADOS = ["\\", "|", "{", "}", "[", "]", "<", ">", "*", "_", "~"]
 
+# Freno de seguridad para pruebas. Con PUBLISH_LINKEDIN_SIMULACRO=1, publicar()
+# y borrar() NUNCA tocan la red: devuelven una respuesta falsa y lo declaran.
+#
+# Existe porque el 31-ago-2026 dos pruebas automatizadas publicaron de verdad en
+# un perfil real. Redirigir el directorio de datos no basta: el token vive en el
+# Keychain y sigue siendo válido. Una suite de pruebas jamás debe poder escribir
+# en producción por accidente.
+SIMULACRO = os.environ.get("PUBLISH_LINKEDIN_SIMULACRO", "") not in ("", "0", "false")
+
 
 class ErrorLinkedIn(Exception):
     """Falla esperable: sin token, token vencido, o la API respondió mal."""
@@ -178,6 +187,9 @@ class LinkedIn:
         }
 
     def quien_soy(self) -> dict:
+        if SIMULACRO:
+            self._urn = "urn:li:person:SIMULACRO"
+            return {"nombre": "Perfil de simulacro", "urn": self._urn}
         r = requests.get(f"{API}/v2/userinfo", headers=self._headers(), timeout=20)
         if r.status_code != 200:
             raise ErrorLinkedIn(f"userinfo devolvió {r.status_code}: {r.text[:300]}")
@@ -193,6 +205,11 @@ class LinkedIn:
             raise ErrorLinkedIn(f"El texto tiene {len(texto)} caracteres; el máximo es 3000.")
         if self._urn is None:
             self.quien_soy()
+
+        if SIMULACRO:
+            falso = f"urn:li:share:SIMULACRO{abs(hash(texto)) % 10**16}"
+            return {"urn": falso, "url": None, "caracteres": len(texto),
+                    "visibilidad": visibilidad, "simulacro": True}
 
         payload = {
             "author": self._urn,
@@ -265,6 +282,8 @@ class LinkedIn:
         """
         import urllib.parse
         urn = self.limpiar_urn(urn)
+        if SIMULACRO:
+            return
         r = requests.delete(
             f"{API}/rest/posts/{urllib.parse.quote(urn, safe='')}",
             headers=self._headers(), timeout=30,
